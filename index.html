@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Builder Island</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='12' y='16' width='40' height='36' rx='8' fill='%2338bdf8' stroke='%230284c7' stroke-width='4'/%3E%3Ccircle cx='24' cy='34' r='5' fill='%230f172a'/%3E%3Ccircle cx='40' cy='34' r='5' fill='%230f172a'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- 1 & 2. Minimal Top Bar: Short Progress (e.g. 1 / 8) + Single Short Instruction (<= 6 words) -->
+    <header class="top-bar">
+      <div class="progress-badge" id="step-progress" aria-label="Progress">1 / 8</div>
+      <h1 class="short-instruction" id="step-instruction">Drag the box to the target.</h1>
+      <button type="button" class="info-corner-btn" id="btn-open-info" title="Story &amp; Teacher Info">
+        ℹ️ Story &amp; Teacher
+      </button>
+    </header>
+
+    <!-- Storage Warning (only visible if browser storage is blocked) -->
+    <div class="storage-toast hidden" id="storage-warning-banner" role="alert">
+      Practice mode only — progress won’t save after refresh.
+    </div>
+
+    <!-- 3. Single Large 3D Interactive Workspace -->
+    <main class="stage-container">
+      <svg
+        id="workspace-3d"
+        viewBox="0 0 1000 620"
+        class="workspace-svg"
+        role="application"
+        aria-label="3D Interactive Workspace"
+      >
+        <!-- Rendered dynamically by src/app.js -->
+      </svg>
+
+      <!-- Interactive ViewCube Overlay inside the 3D Workspace (View Different Faces) -->
+      <div class="viewcube-widget" aria-label="View Faces">
+        <button type="button" class="cube-face-btn active" data-view="ISO" id="view-btn-iso">3D</button>
+        <button type="button" class="cube-face-btn" data-view="TOP" id="view-btn-top">TOP</button>
+        <button type="button" class="cube-face-btn" data-view="FRONT" id="view-btn-front">FRONT</button>
+        <button type="button" class="cube-face-btn" data-view="SIDE" id="view-btn-side">SIDE</button>
+      </div>
+
+      <!-- 4. Small Target Outline / Schematic Thumbnail -->
+      <div class="target-preview-card" aria-label="Target Preview">
+        <span class="target-preview-label">Target</span>
+        <svg id="target-mini-svg" viewBox="0 0 140 100" class="target-mini-svg" aria-hidden="true"></svg>
+      </div>
+
+      <!-- Ultra-short visual hint pill (hidden unless Hint is clicked) -->
+      <div class="hint-toast hidden" id="hint-toast" role="status"></div>
+    </main>
+
+    <!-- 5. Bottom Control Bar: Back, Reset, Hint, Next -->
+    <footer class="bottom-bar">
+      <button type="button" class="ctrl-btn btn-prev" id="btn-prev" disabled>
+        ← Back
+      </button>
+      <button type="button" class="ctrl-btn btn-reset" id="btn-reset">
+        ↺ Reset
+      </button>
+      <button type="button" class="ctrl-btn btn-hint" id="btn-hint">
+        💡 Hint
+      </button>
+      <button type="button" class="ctrl-btn btn-next" id="btn-next" disabled>
+        Next →
+      </button>
+    </footer>
+  </div>
+
+  <!-- Separate Story & Teacher Info Modal (Kept completely out of the main practice interface) -->
+  <div class="modal-backdrop hidden" id="modal-info" role="dialog" aria-modal="true" aria-labelledby="modal-info-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modal-info-title">Builder Island — Story &amp; Teacher Guide</h2>
+        <button type="button" class="modal-close-btn" id="btn-close-info" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="practice-badge">Practice model — not the Tinkercad editor.</p>
+        <h3>Island Story</h3>
+        <p id="story-text">
+          “A little robot has arrived on Builder Island. It has no home yet! Help it build a safe base, a doorway, and a welcome sign.”
+        </p>
+        <h3>Try It in Tinkercad (Student Self-Check)</h3>
+        <p>
+          In your teacher’s prepared Tinkercad workspace, place a <strong>Box</strong> and resize it to <strong>40 × 30 × 4 mm</strong>.
+          (Self-check only — this site never connects to Tinkercad or collects accounts.)
+        </p>
+        <ul class="self-check-list">
+          <li><label><input type="checkbox" class="tinkercad-check" data-check="box" /> Dragged 1 Box onto the Tinkercad Workplane</label></li>
+          <li><label><input type="checkbox" class="tinkercad-check" data-check="size" /> Changed dimensions to 40 × 30 × 4 mm</label></li>
+          <li><label><input type="checkbox" class="tinkercad-check" data-check="flat" /> Checked TOP and FRONT views (sits flat at Z = 0)</label></li>
+        </ul>
+        <details class="teacher-notes-details">
+          <summary>Teacher Notes &amp; Optional Real Screenshot Checklist</summary>
+          <p>
+            This site uses original interactive 3D SVGs and does not impersonate the Tinkercad UI. If you prepare printed classroom cards, you can capture these 3 real Tinkercad screenshots:
+          </p>
+          <ol class="teacher-shot-list">
+            <li>Basic Shapes panel showing the red <strong>Box</strong> tool.</li>
+            <li>A Box on the Workplane with white resize squares and <code>40 × 30 × 4 mm</code> labels.</li>
+            <li>The top-left <strong>ViewCube</strong> showing <code>TOP</code> and <code>FRONT</code> faces.</li>
+          </ol>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Completion Modal after Step 8 (Review My Skills, Try It in Tinkercad, Change My Design, Replay) -->
+  <div class="modal-backdrop hidden" id="modal-complete" role="dialog" aria-modal="true" aria-labelledby="modal-complete-title">
+    <div class="modal-card modal-complete-card">
+      <div class="modal-header">
+        <h2 id="modal-complete-title">🎉 Safe Robot Base Complete!</h2>
+        <button type="button" class="modal-close-btn" id="btn-close-complete" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="practice-badge">Practice model — not the Tinkercad editor.</p>
+        <p>
+          You mastered all 8 spatial 3D steps and built Little Bot’s <strong>40 × 30 × 4 mm</strong> Safe Base!
+        </p>
+
+        <h3>Review My Skills (8 / 8)</h3>
+        <div class="skills-grid" id="skills-review-grid">
+          <span class="skill-chip">✓ 1. Drag to Move</span>
+          <span class="skill-chip">✓ 2. Stretch Length</span>
+          <span class="skill-chip">✓ 3. Push Height (4 mm)</span>
+          <span class="skill-chip">✓ 4. Look TOP View</span>
+          <span class="skill-chip">✓ 5. Rotate 90°</span>
+          <span class="skill-chip">✓ 6. Look FRONT View</span>
+          <span class="skill-chip">✓ 7. Lift Cone (Z)</span>
+          <span class="skill-chip">✓ 8. Pull Width (40×30×4)</span>
+        </div>
+
+        <h3>Try It in Tinkercad (Student Self-Check)</h3>
+        <p>
+          Open your teacher’s prepared Tinkercad environment and build your real base (self-check only):
+        </p>
+        <ul class="self-check-list">
+          <li><label><input type="checkbox" class="tinkercad-check" data-check="box" /> Place a <strong>Box</strong> on the Workplane</label></li>
+          <li><label><input type="checkbox" class="tinkercad-check" data-check="size" /> Resize to <strong>Length 40 mm, Width 30 mm, Height 4 mm</strong></label></li>
+          <li><label><input type="checkbox" class="tinkercad-check" data-check="flat" /> Check <strong>TOP</strong> and <strong>FRONT</strong> views</label></li>
+        </ul>
+
+        <div class="complete-actions">
+          <button type="button" class="ctrl-btn btn-free-design" id="btn-change-design">
+            🛠️ Change My Design
+          </button>
+          <button type="button" class="ctrl-btn btn-replay-all" id="btn-replay-all">
+            ↺ Replay 1 / 8
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
