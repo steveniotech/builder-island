@@ -13,6 +13,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -148,7 +150,7 @@ async function launchChromeWithCDP(userDataDir) {
 
 test('Real Chrome Browser E2E: all 8 steps single-action handles, camera independence, Nice! feedback, and Reset', async () => {
   const { server, baseUrl } = await startStaticServer();
-  const tmpProfileDir = fs.mkdtempSync(path.join(PROJECT_ROOT, '.tmp-chrome-profile-'));
+  const tmpProfileDir = fs.mkdtempSync(path.join(os.tmpdir(), '.tmp-chrome-profile-'));
   let chrome = null;
 
   try {
@@ -161,7 +163,7 @@ test('Real Chrome Browser E2E: all 8 steps single-action handles, camera indepen
       mobile: false
     });
 
-    await chrome.send('Page.navigate', { url: `${baseUrl}/index.html?mode=test` });
+    await chrome.send('Page.navigate', { url: (process.env.OFFLINE === '1' ? pathToFileURL(path.join(PROJECT_ROOT, 'Builder-Island-Student.html')).href + '?mode=test' : `${baseUrl}/index.html?mode=test`) });
     await new Promise((r) => setTimeout(r, 350));
 
     // --- STEP 1: MOVE ONLY ---
@@ -449,6 +451,371 @@ test('Real Chrome Browser E2E: all 8 steps single-action handles, camera indepen
     assert.equal(steps3To8Check.skillsCount, 8, 'Completion modal reviews all 8 skills');
     assert.deepEqual(steps3To8Check.freePlayHandles, ['length', 'width', 'height', 'lift', 'rotate']);
     assert.equal(steps3To8Check.progressAfterReplay, '1 / 8');
+
+    assert.deepEqual(chrome.consoleErrors, []);
+    assert.deepEqual(chrome.pageExceptions, []);
+  } finally {
+    if (chrome) {
+      chrome.ws.close();
+      chrome.proc.kill('SIGKILL');
+    }
+    server.close();
+    fs.rmSync(tmpProfileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test('Real Chrome Browser E2E: Stage 2 — Challenge (all 8 tasks, stage switching, hold-to-turn 90/180/270/-90, directional markers, multi-block selection, and Next re-disable)', async () => {
+  const { server, baseUrl } = await startStaticServer();
+  const tmpProfileDir = fs.mkdtempSync(path.join(os.tmpdir(), '.tmp-chrome-stage2-'));
+  let chrome = null;
+
+  try {
+    chrome = await launchChromeWithCDP(tmpProfileDir);
+
+    await chrome.send('Emulation.setDeviceMetricsOverride', {
+      width: 1280,
+      height: 800,
+      deviceScaleFactor: 1,
+      mobile: false
+    });
+
+    await chrome.send('Page.navigate', { url: (process.env.OFFLINE === '1' ? pathToFileURL(path.join(PROJECT_ROOT, 'Builder-Island-Student.html')).href + '?mode=test' : `${baseUrl}/index.html?mode=test`) });
+    await new Promise((r) => setTimeout(r, 350));
+
+    // 1. Complete Step 1 of Stage 1, advance to Step 2 of Stage 1, then switch to Stage 2 and verify independent state
+    const stageSwitchAndQ1ToQ4 = await chrome.evaluate(`(() => {
+      const svg = document.getElementById('workspace-3d');
+
+      const dragBoxToTarget = (boxId, targetId) => {
+        const boxEl = document.getElementById('student-box-' + boxId);
+        const targetEl = document.getElementById('target-ghost-' + targetId);
+        const bRect = boxEl.getBoundingClientRect();
+        const tRect = targetEl.getBoundingClientRect();
+        boxEl.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          clientX: bRect.left + bRect.width / 2,
+          clientY: bRect.top + bRect.height / 2,
+          pointerId: 1
+        }));
+        svg.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true,
+          clientX: tRect.left + tRect.width / 2,
+          clientY: tRect.top + tRect.height / 2,
+          pointerId: 1
+        }));
+        svg.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+      };
+
+      const holdTurnSelected = (degrees) => {
+        const rotHandle = document.querySelector('[data-action="rotate"]');
+        const rRect = rotHandle.getBoundingClientRect();
+        // A tangential drag expressed in SVG units survives responsive header changes.
+        const saved = JSON.parse(localStorage.getItem('builder-island.isolated-test.v1'));
+        const box = saved.boxes.find(b => b.id === saved.selectedBoxId) || saved.boxes[0];
+        const matrix = svg.getScreenCTM();
+        const yaw = saved.camera.yaw * Math.PI / 180;
+        const pitch = saved.camera.pitch * Math.PI / 180;
+        const wx = box.x + box.length / 2 - 50, wy = box.y + box.width / 2 - 40;
+        const centerX = 500 + (wx * Math.cos(yaw) - wy * Math.sin(yaw)) * 5.6;
+        const centerY = 345 + (wx * Math.sin(yaw) + wy * Math.cos(yaw)) * Math.sin(pitch) * 5.6 - box.z * Math.cos(pitch) * 5.6;
+        const rx = (rRect.left + 10 - matrix.e) / matrix.a - centerX;
+        const ry = (rRect.top + 10 - matrix.f) / matrix.d - centerY;
+        const radius = Math.hypot(rx, ry) || 1;
+        const distance = degrees / 0.85;
+        const dx = -ry / radius * distance * matrix.a;
+        const dy = rx / radius * distance * matrix.d;
+        rotHandle.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          clientX: rRect.left + 10,
+          clientY: rRect.top + 10,
+          pointerId: 1
+        }));
+        svg.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true,
+          clientX: rRect.left + 10 + dx,
+          clientY: rRect.top + 10 + dy,
+          pointerId: 1
+        }));
+        svg.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+      };
+
+      // Complete Stage 1 Step 1 and go to Stage 1 Step 2
+      dragBoxToTarget('b1', 'b1');
+      document.getElementById('btn-next').click();
+      const stage1StepBeforeSwitch = document.getElementById('step-progress').textContent.trim();
+
+      // Switch directly to Stage 2 — Challenge
+      document.getElementById('btn-stage-2').click();
+      const stage2Label = document.getElementById('current-stage-name').textContent.trim();
+      const stage2Step1Progress = document.getElementById('step-progress').textContent.trim();
+      const stage2Step1BackDisabled = document.getElementById('btn-prev').disabled;
+      const stage2Step1NextDisabled = document.getElementById('btn-next').disabled;
+      const q1Instruction = document.getElementById('step-instruction').textContent.trim();
+
+      // Switch back to Stage 1 -> must still be on Step 2 / 8!
+      document.getElementById('btn-stage-1').click();
+      const stage1RestoredProgress = document.getElementById('step-progress').textContent.trim();
+
+      // Switch back to Stage 2 to complete Q1..Q4
+      document.getElementById('btn-stage-2').click();
+
+      // --- Stage 2 Q1: Turn and Move ---
+      // Single click on rotate handle must NOT rotate
+      const rotH = document.querySelector('[data-action="rotate"]');
+      const rhRect = rotH.getBoundingClientRect();
+      rotH.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: rhRect.left + 8, clientY: rhRect.top + 8, pointerId: 1 }));
+      svg.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: rhRect.left + 8, clientY: rhRect.top + 8, pointerId: 1 }));
+      const q1RotAfterSingleClick = JSON.parse(localStorage.getItem('builder-island.isolated-test.v1')).boxes[0].rotation;
+
+      // Move first, then hold-and-turn 90°
+      dragBoxToTarget('b1', 'b1');
+      const q1NextAfterMoveOnly = document.getElementById('btn-next').disabled;
+      holdTurnSelected(90);
+      const q1Matched = !document.getElementById('btn-next').disabled;
+
+      // Move the matched block away -> Next must immediately become disabled again!
+      const b1El = document.getElementById('student-box-b1');
+      const b1Rect = b1El.getBoundingClientRect();
+      b1El.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: b1Rect.left + 20, clientY: b1Rect.top + 20, pointerId: 1 }));
+      svg.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: b1Rect.left - 180, clientY: b1Rect.top, pointerId: 1 }));
+      svg.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+      const q1NextDisabledWhenMovedAway = document.getElementById('btn-next').disabled;
+
+      // Move back to target to complete Q1
+      dragBoxToTarget('b1', 'b1');
+      const q1MatchedAgain = !document.getElementById('btn-next').disabled;
+
+      // --- Stage 2 Q2: Match the Direction (180° with visible direction markers on block & target) ---
+      document.getElementById('btn-next').click();
+      const q2Instruction = document.getElementById('step-instruction').textContent.trim();
+      const q2HasBoxArrow = Boolean(document.querySelector('.box-dir-arrow'));
+      const q2HasTargetArrow = Boolean(document.querySelector('.target-dir-arrow'));
+      dragBoxToTarget('b1', 'b1');
+      const q2NextDisabledAt0Deg = document.getElementById('btn-next').disabled;
+      // Hold and turn 180°
+      holdTurnSelected(180);
+      const q2MatchedAt180 = !document.getElementById('btn-next').disabled;
+
+      // --- Stage 2 Q3: Find the Turn (270° === -90° counter-clockwise or clockwise) ---
+      document.getElementById('btn-next').click();
+      const q3Instruction = document.getElementById('step-instruction').textContent.trim();
+      dragBoxToTarget('b1', 'b1');
+      // Drag counter-clockwise (+120, -20) to -90° (which equals 270°)
+      holdTurnSelected(-90);
+      const q3RotAfterCCW = JSON.parse(localStorage.getItem('builder-island.isolated-test.v1')).boxes[0].rotation;
+      const q3MatchedCCW = !document.getElementById('btn-next').disabled;
+
+      // --- Stage 2 Q4: Look and Match (Hint available on click) ---
+      document.getElementById('btn-next').click();
+      const q4Instruction = document.getElementById('step-instruction').textContent.trim();
+      const q4HintHiddenInitially = document.getElementById('hint-toast').classList.contains('hidden');
+      document.getElementById('btn-hint').click();
+      const q4HintVisibleAfterClick = !document.getElementById('hint-toast').classList.contains('hidden');
+      dragBoxToTarget('b1', 'b1');
+      holdTurnSelected(90);
+      const q4Matched = !document.getElementById('btn-next').disabled;
+
+      return {
+        stage1StepBeforeSwitch,
+        stage2Label,
+        stage2Step1Progress,
+        stage2Step1BackDisabled,
+        stage2Step1NextDisabled,
+        q1Instruction,
+        stage1RestoredProgress,
+        q1RotAfterSingleClick,
+        q1NextAfterMoveOnly,
+        q1Matched,
+        q1NextDisabledWhenMovedAway,
+        q1MatchedAgain,
+        q2Instruction,
+        q2HasBoxArrow,
+        q2HasTargetArrow,
+        q2NextDisabledAt0Deg,
+        q2MatchedAt180,
+        q3Instruction,
+        q3RotAfterCCW,
+        q3MatchedCCW,
+        q4Instruction,
+        q4HintHiddenInitially,
+        q4HintVisibleAfterClick,
+        q4Matched
+      };
+    })()`);
+
+    assert.equal(stageSwitchAndQ1ToQ4.stage1StepBeforeSwitch, '2 / 8');
+    assert.equal(stageSwitchAndQ1ToQ4.stage2Label, 'Stage 2 — Challenge');
+    assert.equal(stageSwitchAndQ1ToQ4.stage2Step1Progress, '1 / 8');
+    assert.equal(stageSwitchAndQ1ToQ4.stage2Step1BackDisabled, true);
+    assert.equal(stageSwitchAndQ1ToQ4.stage2Step1NextDisabled, true);
+    assert.equal(stageSwitchAndQ1ToQ4.q1Instruction, 'Turn and move the block to match the target.');
+    assert.equal(stageSwitchAndQ1ToQ4.stage1RestoredProgress, '2 / 8', 'Switching stages must preserve Stage 1 step');
+    assert.equal(stageSwitchAndQ1ToQ4.q1RotAfterSingleClick, 0, 'Single click on rotate handle must never rotate');
+    assert.equal(stageSwitchAndQ1ToQ4.q1NextAfterMoveOnly, true, 'Move alone must not pass Q1');
+    assert.equal(stageSwitchAndQ1ToQ4.q1Matched, true);
+    assert.equal(stageSwitchAndQ1ToQ4.q1NextDisabledWhenMovedAway, true, 'Moving matched block away must re-disable Next');
+    assert.equal(stageSwitchAndQ1ToQ4.q1MatchedAgain, true);
+
+    assert.equal(stageSwitchAndQ1ToQ4.q2Instruction, 'Match the direction, then move to the target.');
+    assert.equal(stageSwitchAndQ1ToQ4.q2HasBoxArrow, true, 'Q2 block must display directional arrow');
+    assert.equal(stageSwitchAndQ1ToQ4.q2HasTargetArrow, true, 'Q2 target must display directional arrow');
+    assert.equal(stageSwitchAndQ1ToQ4.q2NextDisabledAt0Deg, true, 'Q2 must not pass at 0° when target is 180°');
+    assert.equal(stageSwitchAndQ1ToQ4.q2MatchedAt180, true);
+
+    assert.equal(stageSwitchAndQ1ToQ4.q3Instruction, 'Turn the block to match the target.');
+    assert.equal(stageSwitchAndQ1ToQ4.q3RotAfterCCW, 270, 'Counter-clockwise -90° turn must normalize to 270°');
+    assert.equal(stageSwitchAndQ1ToQ4.q3MatchedCCW, true);
+
+    assert.equal(stageSwitchAndQ1ToQ4.q4Instruction, 'Look closely. Match the position and direction.');
+    assert.equal(stageSwitchAndQ1ToQ4.q4HintHiddenInitially, true);
+    assert.equal(stageSwitchAndQ1ToQ4.q4HintVisibleAfterClick, true);
+    assert.equal(stageSwitchAndQ1ToQ4.q4Matched, true);
+
+    // 2. Complete Stage 2 Multi-Block tasks Q5..Q8 and verify Completion Modal & Stage Selection entry
+    const q5ToQ8 = await chrome.evaluate(`(() => {
+      const svg = document.getElementById('workspace-3d');
+
+      const dragBoxToTarget = (boxId, targetId) => {
+        const boxEl = document.getElementById('student-box-' + boxId);
+        const targetEl = document.getElementById('target-ghost-' + targetId);
+        const bRect = boxEl.getBoundingClientRect();
+        const tRect = targetEl.getBoundingClientRect();
+        boxEl.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          clientX: bRect.left + bRect.width / 2,
+          clientY: bRect.top + bRect.height / 2,
+          pointerId: 1
+        }));
+        svg.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true,
+          clientX: tRect.left + tRect.width / 2,
+          clientY: tRect.top + tRect.height / 2,
+          pointerId: 1
+        }));
+        svg.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+      };
+
+      const holdTurnSelected = (degrees) => {
+        const rotHandle = document.querySelector('[data-action="rotate"]');
+        const rRect = rotHandle.getBoundingClientRect();
+        // A tangential drag expressed in SVG units survives responsive header changes.
+        const saved = JSON.parse(localStorage.getItem('builder-island.isolated-test.v1'));
+        const box = saved.boxes.find(b => b.id === saved.selectedBoxId) || saved.boxes[0];
+        const matrix = svg.getScreenCTM();
+        const yaw = saved.camera.yaw * Math.PI / 180;
+        const pitch = saved.camera.pitch * Math.PI / 180;
+        const wx = box.x + box.length / 2 - 50, wy = box.y + box.width / 2 - 40;
+        const centerX = 500 + (wx * Math.cos(yaw) - wy * Math.sin(yaw)) * 5.6;
+        const centerY = 345 + (wx * Math.sin(yaw) + wy * Math.cos(yaw)) * Math.sin(pitch) * 5.6 - box.z * Math.cos(pitch) * 5.6;
+        const rx = (rRect.left + 10 - matrix.e) / matrix.a - centerX;
+        const ry = (rRect.top + 10 - matrix.f) / matrix.d - centerY;
+        const radius = Math.hypot(rx, ry) || 1;
+        const distance = degrees / 0.85;
+        const dx = -ry / radius * distance * matrix.a;
+        const dy = rx / radius * distance * matrix.d;
+        rotHandle.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          clientX: rRect.left + 10,
+          clientY: rRect.top + 10,
+          pointerId: 1
+        }));
+        svg.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true,
+          clientX: rRect.left + 10 + dx,
+          clientY: rRect.top + 10 + dy,
+          pointerId: 1
+        }));
+        svg.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+      };
+
+      // --- Stage 2 Q5: Two Blocks (move only, no rotate handle) ---
+      document.getElementById('btn-next').click();
+      const q5Instruction = document.getElementById('step-instruction').textContent.trim();
+      const q5Handles = [...document.querySelectorAll('.handle-node')].map((h) => h.dataset.action);
+      const b2Before = { ...JSON.parse(localStorage.getItem('builder-island.isolated-test.v1')).boxes[1] };
+      dragBoxToTarget('b1', 'b1');
+      const b2AfterB1Move = { ...JSON.parse(localStorage.getItem('builder-island.isolated-test.v1')).boxes[1] };
+      const q5NextAfterOneBlock = document.getElementById('btn-next').disabled;
+      dragBoxToTarget('b2', 'b2');
+      const q5Matched = !document.getElementById('btn-next').disabled;
+
+      // --- Stage 2 Q6: One Needs a Turn ---
+      document.getElementById('btn-next').click();
+      const q6Instruction = document.getElementById('step-instruction').textContent.trim();
+      dragBoxToTarget('b1', 'b1');
+      holdTurnSelected(90);
+      dragBoxToTarget('b2', 'b2');
+      const q6Matched = !document.getElementById('btn-next').disabled;
+
+      // --- Stage 2 Q7: Turn Both (b1 turns 90°, b2 turns 180° with directional arrow) ---
+      document.getElementById('btn-next').click();
+      const q7Instruction = document.getElementById('step-instruction').textContent.trim();
+      dragBoxToTarget('b1', 'b1');
+      holdTurnSelected(90);
+      dragBoxToTarget('b2', 'b2');
+      const q7NextBeforeB2Turn = document.getElementById('btn-next').disabled;
+      holdTurnSelected(180);
+      const q7Matched = !document.getElementById('btn-next').disabled;
+
+      // --- Stage 2 Q8: Build the Shape (3 blocks: b1 turns 90°, b2 moves, b3 turns 90°) ---
+      document.getElementById('btn-next').click();
+      const q8Instruction = document.getElementById('step-instruction').textContent.trim();
+      dragBoxToTarget('b1', 'b1');
+      holdTurnSelected(90);
+      dragBoxToTarget('b2', 'b2');
+      // Even after b1 and b2 are matched, b3 can be clearly selected, moved, and rotated via its handle
+      dragBoxToTarget('b3', 'b3');
+      const q8SelectedAfterB3Click = JSON.parse(localStorage.getItem('builder-island.isolated-test.v1')).selectedBoxId;
+      holdTurnSelected(90);
+      const q8Matched = !document.getElementById('btn-next').disabled;
+
+      // Click Finish 🎉 -> opens Stage 2 Completion Modal, then click Choose Stage -> opens Stage Selection Modal
+      document.getElementById('btn-next').click();
+      const completeOpen = !document.getElementById('modal-complete').classList.contains('hidden');
+      const completeTitle = document.getElementById('modal-complete-title').textContent.trim();
+      document.getElementById('btn-stage-select').click();
+      const stagesModalOpen = !document.getElementById('modal-stages').classList.contains('hidden');
+
+      return {
+        q5Instruction,
+        q5Handles,
+        b2UnchangedWhileMovingB1: b2Before.x === b2AfterB1Move.x && b2Before.y === b2AfterB1Move.y,
+        q5NextAfterOneBlock,
+        q5Matched,
+        q6Instruction,
+        q6Matched,
+        q7Instruction,
+        q7NextBeforeB2Turn,
+        q7Matched,
+        q8Instruction,
+        q8SelectedAfterB3Click,
+        q8Matched,
+        completeOpen,
+        completeTitle,
+        stagesModalOpen
+      };
+    })()`);
+
+    assert.equal(q5ToQ8.q5Instruction, 'Move both blocks to their matching targets.');
+    assert.deepEqual(q5ToQ8.q5Handles, [], 'Q5 (move only) must not show rotation handle');
+    assert.equal(q5ToQ8.b2UnchangedWhileMovingB1, true, 'Moving b1 must not move b2');
+    assert.equal(q5ToQ8.q5NextAfterOneBlock, true);
+    assert.equal(q5ToQ8.q5Matched, true);
+
+    assert.equal(q5ToQ8.q6Instruction, 'One block needs a turn. Match both targets.');
+    assert.equal(q5ToQ8.q6Matched, true);
+
+    assert.equal(q5ToQ8.q7Instruction, 'Turn and move both blocks to match.');
+    assert.equal(q5ToQ8.q7NextBeforeB2Turn, true);
+    assert.equal(q5ToQ8.q7Matched, true);
+
+    assert.equal(q5ToQ8.q8Instruction, 'Build the whole shape. Match all three blocks.');
+    assert.equal(q5ToQ8.q8SelectedAfterB3Click, 'b3');
+    assert.equal(q5ToQ8.q8Matched, true);
+
+    assert.equal(q5ToQ8.completeOpen, true);
+    assert.equal(q5ToQ8.completeTitle, '🏆 Stage 2 — Challenge Complete!');
+    assert.equal(q5ToQ8.stagesModalOpen, true, 'Completion modal Choose Stage button opens Stage Selection modal');
 
     assert.deepEqual(chrome.consoleErrors, []);
     assert.deepEqual(chrome.pageExceptions, []);

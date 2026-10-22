@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { startStaticServer, launchChromeWithCDP } from './browser-support.mjs';
+for(const offline of [false,true])test(`Stage 2 native mouse move/hold-turn, reload, Reset and stage isolation (${offline?'offline':'online'})`,async()=>{
+ const {server,baseUrl}=await startStaticServer();
+ const profile=fs.mkdtempSync(path.join(os.tmpdir(),'builder-stage2-native-'));let chrome;
+ try{
+  chrome=await launchChromeWithCDP(profile);const {send,evaluate}=chrome;
+  await send('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false});
+  await send('Page.navigate',{url:(offline?pathToFileURL(path.resolve('Builder-Island-Student.html')).href:`${baseUrl}/index.html`)+'?mode=test'});
+  const ready=async()=>{for(let i=0;i<100;i++){if(await evaluate(`!!document.querySelector('#student-box-b1')`))return;await new Promise(r=>setTimeout(r,20));}throw Error('not ready');};await ready();
+  const rect=selector=>evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+  const mouse=(type,pt)=>send('Input.dispatchMouseEvent',{type,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1,...pt});
+  const click=async selector=>{const p=await rect(selector);await mouse('mousePressed',p);await mouse('mouseReleased',p);};
+  const drag=async(selector,dx,dy)=>{const p=await rect(selector);await mouse('mousePressed',p);for(let i=1;i<=12;i++)await mouse('mouseMoved',{x:p.x+dx*i/12,y:p.y+dy*i/12});await mouse('mouseReleased',{x:p.x+dx,y:p.y+dy});};
+  const moveToTarget=async()=>{const b=await rect('#student-box-b1'),t=await rect('#target-ghost-b1');await drag('#student-box-b1',t.x-b.x,t.y-b.y);};
+  const state=()=>evaluate(`JSON.parse(localStorage.getItem('builder-island.isolated-test.v1'))`);
+  const disabled=()=>evaluate(`document.querySelector('#btn-next').disabled`);
+  await moveToTarget();await click('#btn-next');assert.equal((await state()).currentStep,2);
+  await click('#btn-stage-2');await moveToTarget();assert.equal(await disabled(),true);
+  await click('[data-action="rotate"]');assert.equal((await state()).boxes[0].rotation,0);
+  const r=await rect('[data-action="rotate"]');
+  const center=await evaluate(`(()=>{const s=JSON.parse(localStorage.getItem('builder-island.isolated-test.v1'));const b=s.boxes[0],m=document.querySelector('#workspace-3d').getScreenCTM();const yaw=s.camera.yaw*Math.PI/180,p=s.camera.pitch*Math.PI/180;const dx=b.x+b.length/2-50,dy=b.y+b.width/2-40;return{x:(500+(dx*Math.cos(yaw)-dy*Math.sin(yaw))*5.6)*m.a+m.e,y:(345+(dx*Math.sin(yaw)+dy*Math.cos(yaw))*Math.sin(p)*5.6)*m.d+m.f,a:m.a};})()`);
+  const rx=r.x-center.x,ry=r.y-center.y,len=Math.hypot(rx,ry),distance=(90/0.85)*center.a;
+  await drag('[data-action="rotate"]',-ry/len*distance,rx/len*distance);
+  assert.equal(await disabled(),false,'native hold-turn completes Q1');
+  const solved=await state();await send('Page.reload');await ready();assert.equal(await disabled(),false);assert.deepEqual((await state()).boxes,solved.boxes);
+  await drag('#student-box-b1',-120,0);assert.equal(await disabled(),true);await moveToTarget();assert.equal(await disabled(),false);
+  await click('#btn-reset');assert.equal(await disabled(),true);assert.equal((await state()).boxes[0].rotation,0);
+  await click('#btn-stage-1');assert.equal((await state()).currentStep,2);await click('#btn-stage-2');assert.equal((await state()).currentStep,1);
+  const oldStages=(await state()).stages;
+  await click('#btn-stage-3');await click('#btn-reset');
+  for(const stage of ['1','2'])assert.deepEqual((await state()).stages[stage],oldStages[stage],'Stage 3 Reset preserves earlier stage progress');
+  assert.deepEqual(chrome.consoleErrors,[]);assert.deepEqual(chrome.pageExceptions,[]);
+ }finally{if(chrome){chrome.ws.close();chrome.proc.kill('SIGKILL');}await new Promise(r=>server.close(r));fs.rmSync(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
+});

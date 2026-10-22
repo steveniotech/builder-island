@@ -9,10 +9,27 @@
 </head>
 <body>
   <div class="app-shell">
-    <!-- 1 & 2. Minimal Top Bar: Short Progress (e.g. 1 / 8) + Single Short Instruction (<= 6 words) -->
+    <!-- Top Bar: Stage Selector + Current Stage Name + Progress (1 / 8) + Short Instruction -->
     <header class="top-bar">
-      <div class="progress-badge" id="step-progress" aria-label="Progress">1 / 8</div>
+      <div class="top-left-group">
+        <div class="stage-switcher" role="group" aria-label="Stage Selection">
+          <button type="button" class="stage-pill active" id="btn-stage-1" data-stage="1">
+            Stage 1 — Basics
+          </button>
+          <button type="button" class="stage-pill" id="btn-stage-2" data-stage="2">
+            Stage 2 — Challenge
+          </button>
+          <button type="button" class="stage-pill" id="btn-stage-3" data-stage="3">Stage 3 — Size &amp; Lift</button>
+          <button type="button" class="stage-pill" id="btn-stage-4" data-stage="4">Stage 4 — Rotate in 3D</button>
+        </div>
+        <div class="stage-status-chip">
+          <span class="current-stage-label" id="current-stage-name">Stage 1 — Basics</span>
+          <span class="progress-badge" id="step-progress" aria-label="Progress">1 / 8</span>
+        </div>
+      </div>
+
       <h1 class="short-instruction" id="step-instruction">Drag the box to the target.</h1>
+
       <button type="button" class="info-corner-btn" id="btn-open-info" title="Story &amp; Teacher Info">
         ℹ️ Story &amp; Teacher
       </button>
@@ -23,7 +40,7 @@
       Practice mode only — progress won’t save after refresh.
     </div>
 
-    <!-- 3. Single Large 3D Interactive Workspace -->
+    <!-- Single Large 3D Interactive Workspace -->
     <main class="stage-container">
       <svg
         id="workspace-3d"
@@ -43,7 +60,8 @@
         <button type="button" class="cube-face-btn" data-view="SIDE" id="view-btn-side">SIDE</button>
       </div>
 
-      <!-- 4. Small Target Outline / Schematic Thumbnail -->
+      <div id="turn-toolbar" class="turn-toolbar hidden"><span>Fixed view · FRONT = +Y</span><button type="button" id="btn-turn-help">Three Ways to Turn</button></div>
+      <!-- Small Target Outline / Schematic Thumbnail -->
       <div class="target-preview-card" aria-label="Target Preview">
         <span class="target-preview-label">Target</span>
         <svg id="target-mini-svg" viewBox="0 0 140 100" class="target-mini-svg" aria-hidden="true"></svg>
@@ -53,7 +71,7 @@
       <div class="hint-toast hidden" id="hint-toast" role="status"></div>
     </main>
 
-    <!-- 5. Bottom Control Bar: Back, Reset, Hint, Next -->
+    <!-- Bottom Control Bar: Back, Reset, Hint, Next -->
     <footer class="bottom-bar">
       <button type="button" class="ctrl-btn btn-prev" id="btn-prev" disabled>
         ← Back
@@ -70,7 +88,53 @@
     </footer>
   </div>
 
-  <!-- Separate Story & Teacher Info Modal (Kept completely out of the main practice interface) -->
+  <!-- Stage Selection Modal (accessible from Completion screen) -->
+  <div class="modal-backdrop hidden" id="modal-stages" role="dialog" aria-modal="true" aria-labelledby="modal-stages-title">
+    <div class="modal-card modal-stages-card">
+      <div class="modal-header">
+        <h2 id="modal-stages-title">Choose a Stage</h2>
+        <button type="button" class="modal-close-btn" id="btn-close-stages" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p>Pick any stage to practice. Your progress is saved separately for each stage.</p>
+        <div class="stage-select-grid">
+          <button type="button" class="stage-select-card" id="card-select-stage-1" data-stage="1">
+            <span class="stage-card-title">Stage 1 — Basics</span>
+            <span class="stage-card-desc">8 single-action steps: Move, Stretch, Height, Views, Turn 90°, and Lift.</span>
+            <span class="stage-card-progress" id="stage-1-progress-summary">8 steps</span>
+          </button>
+          <button type="button" class="stage-select-card" id="card-select-stage-2" data-stage="2">
+            <span class="stage-card-title">Stage 2 — Challenge</span>
+            <span class="stage-card-desc">8 spatial challenges: Turn &amp; Move, Direction Arrows, and Multi-Block Shapes.</span>
+            <span class="stage-card-progress" id="stage-2-progress-summary">8 steps</span>
+          </button>
+          <button type="button" class="stage-select-card" id="card-select-stage-3" data-stage="3">
+            <span class="stage-card-title">Stage 3 — Size &amp; Lift</span>
+            <span class="stage-card-desc">8 tasks: proportional size, length, width, and height above the ground.</span>
+            <span class="stage-card-progress" id="stage-3-progress-summary">8 steps</span>
+          </button>
+          <button type="button" class="stage-select-card" id="card-select-stage-4" data-stage="4">
+            <span class="stage-card-title">Stage 4 — Rotate in 3D</span><span class="stage-card-desc">8 tasks: Spin, Tip Forward / Back, and Tip Sideways.</span><span class="stage-card-progress" id="stage-4-progress-summary">8 steps</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="modal-turn-intro" role="dialog" aria-modal="true" aria-labelledby="turn-intro-title">
+    <div class="modal-card turn-intro-card">
+      <div class="modal-header"><h2 id="turn-intro-title">Three Ways to Turn</h2><button type="button" id="btn-close-turn-intro" class="modal-close-btn" aria-label="Close rotation introduction">✕</button></div>
+      <div class="turn-intro-diagrams">
+        <div><svg viewBox="0 0 100 80" aria-hidden="true"><path d="M50 60V10M25 45L50 30L75 45L50 60Z" fill="#ddd6fe" stroke="#7c3aed" stroke-width="3"/><path d="M20 60C-5 35 95 35 80 60L80 45M80 60L65 57" fill="none" stroke="#0f172a" stroke-width="3"/></svg><p>Spin: turn on the workplane.</p></div>
+        <div><svg viewBox="0 0 100 80" aria-hidden="true"><path d="M10 45H90M35 20L65 30L65 65L35 55Z" fill="#fed7aa" stroke="#b45309" stroke-width="3"/><path d="M20 15C70 -5 90 75 55 75L65 65M55 75L70 78" fill="none" stroke="#0f172a" stroke-width="3"/></svg><p>Tip forward or back.</p></div>
+        <div><svg viewBox="0 0 100 80" aria-hidden="true"><path d="M20 65L80 15M30 25H65V60H30Z" fill="#bae6fd" stroke="#0369a1" stroke-width="3"/><path d="M15 35C25 -5 95 15 85 55L78 43M85 55L96 46" fill="none" stroke="#0f172a" stroke-width="3"/></svg><p>Tip from side to side.</p></div>
+      </div>
+      <p><strong>Choose a curved arrow. Hold and drag.</strong></p>
+      <p>▲ Black triangle = lift the whole block.<br>↻ Curved arrows = rotate the block.</p>
+      <button type="button" id="btn-start-turn" class="ctrl-btn btn-next">Let’s Turn</button>
+    </div>
+  </div>
+  <!-- Separate Story & Teacher Info Modal -->
   <div class="modal-backdrop hidden" id="modal-info" role="dialog" aria-modal="true" aria-labelledby="modal-info-title">
     <div class="modal-card">
       <div class="modal-header">
@@ -108,7 +172,7 @@
     </div>
   </div>
 
-  <!-- Completion Modal after Step 8 (Review My Skills, Try It in Tinkercad, Change My Design, Replay) -->
+  <!-- Completion Modal after Step 8 -->
   <div class="modal-backdrop hidden" id="modal-complete" role="dialog" aria-modal="true" aria-labelledby="modal-complete-title">
     <div class="modal-card modal-complete-card">
       <div class="modal-header">
@@ -117,11 +181,11 @@
       </div>
       <div class="modal-body">
         <p class="practice-badge">Practice model — not the Tinkercad editor.</p>
-        <p>
+        <p id="modal-complete-desc">
           You mastered all 8 spatial 3D steps and built Little Bot’s <strong>40 × 30 × 4 mm</strong> Safe Base!
         </p>
 
-        <h3>Review My Skills (8 / 8)</h3>
+        <h3 id="modal-complete-skills-heading">Review My Skills (8 / 8)</h3>
         <div class="skills-grid" id="skills-review-grid">
           <span class="skill-chip">✓ 1. Drag to Move</span>
           <span class="skill-chip">✓ 2. Stretch Length</span>
@@ -135,15 +199,18 @@
 
         <h3>Try It in Tinkercad (Student Self-Check)</h3>
         <p>
-          Open your teacher’s prepared Tinkercad environment and build your real base (self-check only):
+          Open your teacher’s prepared Tinkercad environment and build your real model (self-check only):
         </p>
         <ul class="self-check-list">
-          <li><label><input type="checkbox" class="tinkercad-check" data-check="box" /> Place a <strong>Box</strong> on the Workplane</label></li>
-          <li><label><input type="checkbox" class="tinkercad-check" data-check="size" /> Resize to <strong>Length 40 mm, Width 30 mm, Height 4 mm</strong></label></li>
+          <li><label><input type="checkbox" class="tinkercad-check" data-check="box" /> Place <strong>Box</strong> shapes on the Workplane</label></li>
+          <li><label><input type="checkbox" class="tinkercad-check" data-check="size" /> Match position, size, and rotation</label></li>
           <li><label><input type="checkbox" class="tinkercad-check" data-check="flat" /> Check <strong>TOP</strong> and <strong>FRONT</strong> views</label></li>
         </ul>
 
         <div class="complete-actions">
+          <button type="button" class="ctrl-btn btn-stage-select" id="btn-stage-select">
+            🗺️ Choose Stage
+          </button>
           <button type="button" class="ctrl-btn btn-free-design" id="btn-change-design">
             🛠️ Change My Design
           </button>
