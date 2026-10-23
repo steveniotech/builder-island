@@ -167,7 +167,7 @@ for (const offline of [false,true]) for (const mobile of [false,true]) {
    assert.match(await evaluate(`document.querySelector('#modal-complete-title').textContent`),/Stage 3/);
    await click('#btn-stage-select');
    assert.equal(await evaluate(`!document.querySelector('#modal-stages').classList.contains('hidden')`),true);
-   assert.equal(await evaluate(`document.querySelectorAll('.stage-select-card').length`),4);
+   assert.equal(await evaluate(`document.querySelectorAll('.stage-select-card').length`),6);
    await click('#card-select-stage-1');
    const beforeReplay=(await read()).stages;
    assert.equal((await read()).currentStage,1);

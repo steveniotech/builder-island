@@ -7,7 +7,8 @@
 
 import {
   WORKPLANE,
-  TOTAL_STEPS,
+  getStageStepCount,
+  isRotationStage,
   createInitialState,
   createStepState,
   toPlainBox,
@@ -16,6 +17,7 @@ import {
   clamp,
   updateBoxInState,
   normalizeOrientation,
+  restoreAlignSnapshot,
   ORIENTATION_VERSION
 } from './model.js';
 
@@ -108,13 +110,14 @@ export function createStorageManager(options = {}) {
   }
 
   function sanitizeStageSnapshot(snap, stageId = 1) {
-    const normalizedStage = [1, 2, 3, 4].includes(stageId) ? stageId : 1;
+    const normalizedStage = [1, 2, 3, 4, 5, 6].includes(stageId) ? stageId : 1;
     if (!snap || typeof snap !== 'object') {
       return createInitialState(normalizedStage);
     }
 
+    const totalSteps = getStageStepCount(normalizedStage);
     const step = Number.isFinite(Number(snap.currentStep))
-      ? Math.max(1, Math.min(TOTAL_STEPS, Math.round(Number(snap.currentStep))))
+      ? Math.max(1, Math.min(totalSteps, Math.round(Number(snap.currentStep))))
       : 1;
 
     const completedSteps = Array.isArray(snap.completedSteps)
@@ -122,12 +125,14 @@ export function createStorageManager(options = {}) {
           new Set(
             snap.completedSteps
               .map((n) => Number(n))
-              .filter((n) => Number.isInteger(n) && n >= 1 && n <= TOTAL_STEPS)
+              .filter((n) => Number.isInteger(n) && n >= 1 && n <= totalSteps)
           )
         )
       : [];
 
     const state = createStepState(step, completedSteps, normalizedStage);
+    // Removed Align tasks must never donate their geometry or reference to Q9.
+    if (normalizedStage === 6 && Number(snap.currentStep) > totalSteps) return state;
 
     if (Array.isArray(snap.boxes) && snap.boxes.length > 0) {
       state.boxes = state.boxes.map((defaultBox, idx) => {
@@ -157,8 +162,10 @@ export function createStorageManager(options = {}) {
       state.box = normalized.box;
     }
 
-    if (normalizedStage === 4) {
-      const initial = createStepState(step, completedSteps, 4);
+    if(normalizedStage===6)return restoreAlignSnapshot(state,snap);
+
+    if (isRotationStage(normalizedStage)) {
+      const initial = createStepState(step, completedSteps, normalizedStage);
       const saved = (Array.isArray(snap.boxes) && snap.boxes[0]) || snap.box || {};
       const orientation = saved.orientationVersion === ORIENTATION_VERSION ? normalizeOrientation(saved.orientation) : [1,0,0,0];
       state.boxes = [{...initial.boxes[0], orientation}];
@@ -172,7 +179,7 @@ export function createStorageManager(options = {}) {
       state.selectedBoxId = snap.selectedBoxId;
     }
 
-    if (normalizedStage !== 4 && snap.camera && typeof snap.camera === 'object') {
+    if (!isRotationStage(normalizedStage) && snap.camera && typeof snap.camera === 'object') {
       state.camera = {
         face: typeof snap.camera.face === 'string' ? snap.camera.face : state.camera.face,
         yaw: Number.isFinite(Number(snap.camera.yaw)) ? Number(snap.camera.yaw) : state.camera.yaw,
@@ -203,17 +210,17 @@ export function createStorageManager(options = {}) {
 
   function sanitizeLoadedState(parsed, requestedStageId = null) {
     if (!parsed || typeof parsed !== 'object' || (![3,4,5].includes(parsed.version))) {
-      return createInitialState([1, 2, 3, 4].includes(requestedStageId) ? requestedStageId : 1);
+      return createInitialState([1, 2, 3, 4, 5, 6].includes(requestedStageId) ? requestedStageId : 1);
     }
 
     const activeStage =
-      [1, 2, 3, 4].includes(requestedStageId)
+      [1, 2, 3, 4, 5, 6].includes(requestedStageId)
         ? requestedStageId
-        : [1, 2, 3, 4].includes(parsed.currentStage)
+        : [1, 2, 3, 4, 5, 6].includes(parsed.currentStage)
           ? parsed.currentStage
           : 1;
 
-    if (activeStage === 4 && parsed.version !== 5) return createInitialState(4);
+    if (isRotationStage(activeStage) && parsed.version !== 5) return createInitialState(activeStage);
 
     if ([4,5].includes(parsed.version) && parsed.stages && typeof parsed.stages === 'object') {
       const stageSnap = parsed.stages[activeStage] || parsed.stages[String(activeStage)];
@@ -232,12 +239,12 @@ export function createStorageManager(options = {}) {
 
   function loadProgress(requestedStageId = null) {
     const parsed = readRawObject();
-    if (!parsed) return createInitialState([1, 2, 3, 4].includes(requestedStageId) ? requestedStageId : 1);
+    if (!parsed) return createInitialState([1, 2, 3, 4, 5, 6].includes(requestedStageId) ? requestedStageId : 1);
     return sanitizeLoadedState(parsed, requestedStageId);
   }
 
   function saveProgress(state) {
-    const activeStage = [1, 2, 3, 4].includes(state.currentStage) ? state.currentStage : 1;
+    const activeStage = [1, 2, 3, 4, 5, 6].includes(state.currentStage) ? state.currentStage : 1;
     const existing = readRawObject();
 
     const existingStages =
@@ -261,6 +268,7 @@ export function createStorageManager(options = {}) {
       box: state.box,
       boxes: state.boxes,
       selectedBoxId: state.selectedBoxId,
+      ...(activeStage===6?{align:state.align}:{}),
       camera: state.camera
     };
 
@@ -275,6 +283,7 @@ export function createStorageManager(options = {}) {
       box: state.box,
       boxes: state.boxes,
       selectedBoxId: state.selectedBoxId,
+      ...(activeStage===6?{align:state.align}:{}),
       camera: state.camera,
       stages: existingStages
     });

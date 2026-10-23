@@ -136,7 +136,7 @@ async function launchChromeWithCDP(userDataDir) {
       awaitPromise: true
     });
     if (res.exceptionDetails) {
-      throw new Error(`Eval error: ${res.exceptionDetails.text}`);
+      throw new Error(`Eval error: ${res.exceptionDetails.exception?.description || res.exceptionDetails.text}`);
     }
     return res.result.value;
   }
@@ -350,8 +350,20 @@ test('Real Chrome Browser E2E: all 8 steps single-action handles, camera indepen
       // 2) Click and hold then turn (drag) rotates the box to 90 deg
       const rotHandleDrag = document.querySelector('[data-action="rotate"]');
       const rRectDrag = rotHandleDrag.getBoundingClientRect();
-      rotHandleDrag.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: rRectDrag.left + 10, clientY: rRectDrag.top + 10, pointerId: 1 }));
-      svg.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: rRectDrag.left - 110, clientY: rRectDrag.top + 30, pointerId: 1 }));
+      // Use the projected scale, rather than a fixed CSS distance that changes
+      // meaning when the stage switcher wraps and the workspace height changes.
+      const savedTurn = JSON.parse(localStorage.getItem('builder-island.isolated-test.v1'));
+      const turnBox = savedTurn.boxes[0], turnCam = savedTurn.camera;
+      const turnMatrix = svg.getScreenCTM();
+      const yaw = turnCam.yaw * Math.PI / 180, pitch = turnCam.pitch * Math.PI / 180;
+      const ox = turnBox.x + turnBox.length / 2 - 50, oy = turnBox.y + turnBox.width / 2 - 40;
+      const centerX = (500 + (ox * Math.cos(yaw) - oy * Math.sin(yaw)) * 5.6) * turnMatrix.a + turnMatrix.e;
+      const centerY = (345 + (ox * Math.sin(yaw) + oy * Math.cos(yaw)) * Math.sin(pitch) * 5.6) * turnMatrix.d + turnMatrix.f;
+      const startX = rRectDrag.left + rRectDrag.width / 2, startY = rRectDrag.top + rRectDrag.height / 2;
+      const rx = startX - centerX, ry = startY - centerY, radius = Math.hypot(rx, ry);
+      const distance = (90 / 0.85) * turnMatrix.a;
+      rotHandleDrag.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: startX, clientY: startY, pointerId: 1 }));
+      svg.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: startX - ry / radius * distance, clientY: startY + rx / radius * distance, pointerId: 1 }));
       svg.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
       const s5Nice = document.getElementById('step-instruction').textContent.trim();
 

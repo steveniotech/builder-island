@@ -1,6 +1,6 @@
 # Builder Island — Local Testing & Verification
 
-This report describes checks actually executed during local development through Stage 4 on 2026-10-22. Documentation claims are not a substitute for running the tests. No dependencies were installed, and no commit, push or deployment was performed.
+This report describes checks actually executed during local development through Stages 5 and 6 on 2026-10-22. Documentation claims are not a substitute for running the tests. No dependencies were installed, and no commit, push or deployment was performed.
 
 ## Environment
 
@@ -15,8 +15,8 @@ This report describes checks actually executed during local development through 
 Run from the project root:
 
 ```bash
-# Logic and storage regression (20 tests)
-node --test tests/model-and-storage.test.mjs tests/storage-regression.test.mjs tests/stage3-model.test.mjs tests/stage4-model.test.mjs
+# Logic and storage regression (27 tests)
+node --test tests/model-and-storage.test.mjs tests/storage-regression.test.mjs tests/stage3-model.test.mjs tests/stage4-model.test.mjs tests/stage5-model.test.mjs
 
 # Original Stage 1–2 browser flows (2 tests, HTTP)
 node --test tests/browser-e2e.test.mjs
@@ -32,6 +32,9 @@ node --test tests/stage3-browser.test.mjs
 
 # Stage 4 native input (4 tests: HTTP/file:// × desktop/mobile viewport)
 node --test tests/stage4-browser.test.mjs
+
+# Stage 5 native input (4 tests: HTTP/file:// × desktop/mobile viewport)
+node --test tests/stage5-browser.test.mjs
 
 # Offline artifact regeneration and exact sync check
 node scripts/build-offline.mjs
@@ -56,12 +59,13 @@ Open `http://127.0.0.1:8080/index.html?mode=test`, or open `Builder-Island-Stude
 
 | Check | Result |
 | --- | --- |
-| Logic/storage, Stages 1–4 | 20 passed, 0 failed |
+| Logic/storage, Stages 1–5 | 27 passed, 0 failed |
 | Original Stage 1–2 HTTP flows | 2 passed, 0 failed |
 | Original Stage 1–2 file:// flows | 2 passed, 0 failed |
 | Stage 2 native mouse supplement, HTTP/file:// | 2 passed, 0 failed |
 | Stage 3 native mouse/touch, HTTP/file:// | 4 passed, 0 failed |
 | Stage 4 native mouse/touch, HTTP/file:// | 4 passed, 0 failed |
+| Stage 5 native mouse/touch, HTTP/file://, all 12 tasks per run | 4 passed, 0 failed |
 | Captured browser console errors / uncaught exceptions | 0 / 0 |
 | Offline exact-sync, source syntax, whitespace checks | Passed |
 
@@ -158,3 +162,51 @@ One original Stage 2 synthesized-event assertion initially failed because its 18
 The existing storage keys remain unchanged. New writes use envelope version 5; Stage 4 boxes use `orientationVersion:1`. v3 and v4 reads remain supported, and old scalar `rotation` data is not converted into Stage 4 completion. No localStorage clearing is performed.
 
 “HTTP” in this report means local loopback preview, **not GitHub Pages**. Real phones/iPads, Safari, Firefox, mobile Stage 1–2 native touch flows, exhaustive landscape/orientation combinations, multi-touch and keyboard-only/screen-reader use remain **unverified**. The model has no physics/collision/stacking. No dependencies, accounts, external services, commit, push or deployment were added.
+
+
+## Stage 5 — Rotation Challenge
+
+The twelve world-axis solutions and the two duplicate-target corrections are recorded in README. Stage 5 reuses Stage 4's quaternion composition, marked cuboid, camera, controls and matching. The total is configuration-driven (12 here, 8 in each earlier stage); storage envelope v5 and orientationVersion 1 remain compatible.
+
+### Logic (`tests/stage5-model.test.mjs`)
+
+Seven tests cover complete configuration and prompts; all three actions on every task; twelve distinct target orientations; the original Q9/Q12 duplicates and corrected targets; noncommutative Q7/Q10 order; Q12 not being a single-coordinate-axis rotation; reference solutions, full-turn/quaternion-sign equivalence and rejection of wrong face orientations; unchanged center/dimensions/camera and blocked non-rotation edits; observation/action/from-start hint layers; 12-task navigation/storage boundaries and independence; v3/v4/v5 compatibility without inventing Stage 5 completion.
+
+### Native browser (`tests/stage5-browser.test.mjs`)
+
+Four complete twelve-task runs use installed Chrome: local HTTP and the generated file:// bundle, each with desktop native CDP mouse at 1280×800 and mobile viewport native CDP touch simulation at 390×844. No internal state is written to complete tasks. Every task physically hit-tests and drags all three controls in both directions, then reaches the target by its reference solution.
+
+Checks include click-only and pointer-down no-op, selected fixed-axis changes, active guides/fading and restored appearance, unchanged center/size/camera, release/touch-cancel stopping rotation, extra full turns, wrong-axis recovery, no scrolling, control/model/target separation and visible navigation. Every task checks Next disabled before matching, enabled without auto-advance, and disabled again after turning away. Hint layers leave geometry and saved orientation unchanged and explicitly label start-based advice. Back, current-task Reset, stage switching, refresh, twelve-chip completion, stage summaries and replay preserve previous-stage snapshots. Quaternion restoration is compared by orientation equivalence, allowing normalization rounding at machine precision.
+
+Screenshots of tasks 1, 7, 10 and 12 are written only to the OS temporary directory, outside the repository. Real devices, Safari and Firefox remain **unverified**. HTTP here means local loopback preview; this task does not publish or validate a new GitHub Pages version.
+
+Final Stage 5 local run: **27 logic/storage tests and 18 browser tests passed**, with no captured console errors or uncaught exceptions. The legacy Stage 1 synthesized rotation gesture was changed from a fixed CSS-pixel distance to a projection-scaled tangent drag so navigation wrapping does not change its intended 90° turn; application rotation behavior is unchanged. Twelve-item completion may require scrolling within the existing small-screen modal; the browser test scrolls the button into view and checks its actual hit target before clicking. Offline exact sync, source syntax and whitespace checks passed. No dependencies were installed and no commit, push or deployment was performed for Stage 5.
+
+
+## Stage 6 — Align Shapes (9 retained tasks)
+
+Stage 6 contains exactly the original tasks 1–9: X min/center/max, Y max/center/min (Front/Center/Back), Z min/center/max. The cancelled tasks and Q10 teaching-pilot implementation/tests are removed. Prior 12-task and pilot test totals do not describe this version. Stage counts come from configuration: [8, 8, 8, 8, 12, 9].
+
+```bash
+node --test tests/model-and-storage.test.mjs tests/storage-regression.test.mjs tests/stage3-model.test.mjs tests/stage4-model.test.mjs tests/stage5-model.test.mjs tests/stage6-model.test.mjs
+node --test tests/stage6-browser.test.mjs tests/stage6-migration-browser.test.mjs
+ALIGN_LAYOUT_REGRESSION=1 node --test tests/stage6-browser.test.mjs
+node scripts/build-offline.mjs
+node scripts/build-offline.mjs --check
+```
+
+The Stage 6 logic/storage tests cover each geometric alignment calculation, different dimensions, reference invariance, axis-only changes, stable repeat clicks, unchanged dimensions/orientation, pure preview, actual-operation evidence, current match versus history, selection/reference guards, Undo, Reset, all nine targets, independent storage and corrupt metadata. Generic three-model algorithm coverage remains, without retaining cancelled practice tasks.
+
+Migration fixtures for old task numbers 10/11/12 exercise old completion lists with gaps, duplicates and cancelled entries. Loading must return exactly Q9’s own initial geometry, selection, Align/reference/Undo state; retain only valid 1–9 history; never infer completion from the old task number; and preserve all other stage snapshots and unrelated storage keys. Existing v4/v5 interpretation rules are unchanged. Browser fixture injection is used only to test legacy loading, never to claim interaction completion.
+
+`stage6-browser.test.mjs` completes all nine tasks using native CDP mouse clicks/touch taps. It checks 1 / 9 through 9 / 9, every offered min/center/max option, wrong options, unchanged reference/other axes/size/orientation, all live 44px hit bounds and their separation from models/target, Hint without state edits, pure preview, Undo with historical completion, Reset, refresh, Back and Stage 5 round trips. Q9 Finish opens a nine-skill Stage 6 completion dialog; stage selection shows 9 / 9 and nine completed, with no Q10 navigation. Replay returns to Q1. Other-stage snapshots remain intact.
+
+Default interaction profiles: 1280×900 mouse and 390×844 touch simulation, each via local HTTP and generated file://. The layout matrix uses 636×580 mouse/DPR2, 390×844 touch/DPR1, 1024×600 mouse/DPR1 and 844×390 landscape touch/DPR1, each via HTTP/file. All use default 100% zoom and page scale 1. Q9 resize coverage switches between 636×580 grouped controls and 390×844 projected dots; exactly three live targets remain, position/reference state stays intact, and native Top/Undo still works. The previously fixed grouped-button implementation remains; target areas are not reduced to hide overlap.
+
+`stage6-migration-browser.test.mjs` checks all three cancelled save numbers and `step=10/11/12` legacy URL parameters in HTTP and offline Chrome. Each shows normal unmatched Q9, two configured models, Align off and Next disabled. A normal Reset confirms the rendered geometry was already the fresh Q9 setup and leaves other stage records intact. Console errors and uncaught exceptions are captured.
+
+Real phones/iPads, Safari, Firefox, a complete keyboard-only and screen-reader flow remain unverified. Touch profiles are simulations, not real devices; local HTTP is not a GitHub Pages production check. This change does not commit, push or deploy.
+
+Final executed results for the nine-task reduction: **36 logic/storage tests passed, 0 failed**; **26 browser tests passed, 0 failed**: 8 native nine-task flows (1280×900 mouse, 636×580 mouse/DPR2, 390×844 touch simulation, 844×390 landscape touch simulation, each HTTP/file), 2 migration/deep-link browser tests, and 16 prior-stage regression tests. Each migration browser test covers all three cancelled save numbers and all three legacy step parameters. The optional 1024×600 layout profile was not run in this change. All executed Stage 6 live target rectangles were at least 44px, non-overlapping and inside the viewport; Q9 grouped/projected resizing retained exactly three live targets. Captured console errors and uncaught exceptions: **0 / 0**. The final source/offline exact-sync, syntax and whitespace checks passed.
+
+The 16 prior-stage tests comprise 2 HTTP complete Stage 1/2 flows, 2 Stage 2 native-mouse HTTP/file variants, and 4 mouse/touch × HTTP/file variants each for Stages 3–5. The separate `OFFLINE=1` Stage 1/2 complete-flow pair was not rerun. Browser fixture setup does not count as actual task completion; all eight nine-task Stage 6 flows use real native input on the visible controls.

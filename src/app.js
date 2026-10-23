@@ -7,7 +7,8 @@
 import {
   WORKPLANE,
   CAMERA_PRESETS,
-  TOTAL_STEPS,
+  getStageStepCount,
+  isRotationStage,
   getStageConfig,
   getStepConfig,
   getStepBoxesAndTargets,
@@ -20,6 +21,7 @@ import {
   clamp,
   TURN_AXES,
   rotateVector,
+  ALIGN_AXES, ALIGN_MODES, selectAlignBox, setAlignMode, applyAlign, undoAlign, previewAlign,
   orientedPoint
 } from './model.js';
 
@@ -30,7 +32,12 @@ const storageManager = createStorageManager({
 });
 
 const requestedStage = Number(new URLSearchParams(window.location.search).get('stage'));
-let appState = storageManager.loadProgress([1,2,3,4].includes(requestedStage) ? requestedStage : null);
+let appState = storageManager.loadProgress([1,2,3,4,5,6].includes(requestedStage) ? requestedStage : null);
+// Old Align deep links open the retained final task with its own normal setup.
+const removedAlignStep = Number(new URLSearchParams(window.location.search).get('step'));
+if (appState.currentStage===6 && [10,11,12].includes(removedAlignStep)) {
+  appState=createStepState(getStageStepCount(6),appState.completedSteps,6);
+}
 let pointerSession = null;
 
 const dom = {
@@ -213,7 +220,7 @@ function buildOrientedFaces(box, cam, cx, cy, scale, options) {
 
 // Handle positions follow the projected center/bounds; the reference axes remain WORLD axes.
 function buildTurnHandles(box, target, cam, cx, cy, scale) {
-  const cfg=getStepConfig(appState.currentStep,4);
+  const cfg=getStepConfig(appState.currentStep,appState.currentStage);
   const screen=dom.workspaceSvg.getScreenCTM()?.a || 1;
   const v=getBoxVertices(box), t=getBoxVertices(target);
   const center=projectPoint(v.cx,v.cy,box.z+box.height/2,cam,cx,cy,scale);
@@ -496,9 +503,72 @@ function getBoxAllowedActions(box, cfg, freePlay) {
 /**
  * Renders the main 3D interactive workspace SVG
  */
+// Click controls are projected from world-space bounds; no screen-axis alignment math.
+function buildAlignControls(cfg,cam,cx,cy,scale) {
+  const a=appState.align;
+  if(!a.active || document.body.classList.contains('align-compact'))return '';
+  const bounds=[...cfg.initialBoxes,...appState.boxes];
+  const lo=k=>Math.min(...bounds.map(b=>b[k]));
+  const hi=(k,size)=>Math.max(...bounds.map(b=>b[k]+b[size]));
+  const xmin=lo('x'),xmax=hi('x','length'),ymin=lo('y'),ymax=hi('y','width'),zmin=0,zmax=Math.max(70,hi('z','height'));
+  const xr=Math.max(90,xmax-xmin),yr=Math.max(90,ymax-ymin);
+  const xmid=(xmin+xmax)/2,ymid=(ymin+ymax)/2;
+  const rows={x:[{x:xmid-xr/2,y:ymax+52,z:0},{x:xmid+xr/2,y:ymax+52,z:0}],
+    y:[{x:xmin-(cfg.axes.length===3?63:52),y:ymid-yr/2-(cfg.axes.length===3?24:0),z:0},{x:xmin-(cfg.axes.length===3?63:52),y:ymid+yr/2-(cfg.axes.length===3?24:0),z:0}],
+    z:[{x:xmax+26,y:ymin-10,z:zmin},{x:xmax+26,y:ymin-10,z:zmax}]};
+  const screen=dom.workspaceSvg.getScreenCTM()?.a||1,r=22/screen,font=12/screen;
+  const enabled=a.referenceId===cfg.referenceId && a.selectedIds.length>=2;
+  return cfg.axes.map(axis=>{
+    const ends=rows[axis],ps=ends.map(p=>projectPoint(p.x,p.y,p.z,cam,cx,cy,scale));
+    const line=`<line x1="${ps[0].x}" y1="${ps[0].y}" x2="${ps[1].x}" y2="${ps[1].y}" stroke="#475569" stroke-width="2" pointer-events="none"/>`;
+    return line+ALIGN_MODES.map((mode,i)=>{
+      const t=i/2,p={x:ends[0].x+(ends[1].x-ends[0].x)*t,y:ends[0].y+(ends[1].y-ends[0].y)*t,z:ends[0].z+(ends[1].z-ends[0].z)*t};
+      const q=projectPoint(p.x,p.y,p.z,cam,cx,cy,scale),label=ALIGN_AXES[axis].labels[i];
+      return `<g class="align-dot" data-axis="${axis}" data-mode="${mode}" role="button" tabindex="${enabled?0:-1}" aria-label="${ALIGN_AXES[axis].title}: ${label}" aria-disabled="${!enabled}" transform="translate(${q.x},${q.y})" style="cursor:${enabled?'pointer':'default'};opacity:${enabled?1:.4}">
+        <circle class="align-hit" r="${r}" fill="transparent"/><circle r="${7/screen}" fill="#111827" stroke="white" stroke-width="${2/screen}" pointer-events="none"/>
+        <text y="${r+font}" text-anchor="middle" font-size="${font}" font-weight="800" fill="#0f172a" pointer-events="none">${label}</text></g>`;
+    }).join('');
+  }).join('');
+}
+// When the viewport cannot safely fit projected 44px targets, expose the same
+// axis/mode pairs as separated native buttons. Geometry and storage stay shared.
+function renderCompactAlignControls() {
+  const panel=document.getElementById('align-compact-controls');
+  const visible=appState.currentStage===6 && document.body.classList.contains('align-compact') && appState.align.active;
+  panel.classList.toggle('hidden',!visible);
+  if(!visible){panel.innerHTML='';return;}
+  const cfg=getStepConfig(appState.currentStep,6),a=appState.align;
+  const enabled=a.referenceId===cfg.referenceId && a.selectedIds.length>=2;
+  panel.innerHTML=cfg.axes.map(axis=>`<div class="align-control-group" role="group" aria-label="${ALIGN_AXES[axis].title}">
+    <span class="align-group-title">${axis==='z'?'↑':'↔'} ${ALIGN_AXES[axis].title} · ${axis.toUpperCase()}</span>
+    ${ALIGN_MODES.map((mode,i)=>`<div class="align-dot" data-axis="${axis}" data-mode="${mode}" aria-disabled="${!enabled}">
+      <button type="button" class="align-hit" ${enabled?'':'disabled'} aria-label="${ALIGN_AXES[axis].title}: ${ALIGN_AXES[axis].labels[i]}"><span class="align-circle" aria-hidden="true">●</span>${ALIGN_AXES[axis].labels[i]}</button>
+    </div>`).join('')}</div>`).join('');
+}
+function renderAlignToolbar() {
+  const toolbar=document.getElementById('align-toolbar');
+  toolbar.classList.toggle('hidden',appState.currentStage!==6);
+  if(appState.currentStage!==6)return;
+  const a=appState.align,cfg=getStepConfig(appState.currentStep,6);
+  if(document.body.classList.contains('align-compact')){const rail=document.querySelector('.stage-switcher');rail.scrollLeft=rail.scrollWidth;}
+  document.getElementById('btn-multiple').setAttribute('aria-pressed',String(a.multiple));
+  document.getElementById('btn-multiple').disabled=a.active;
+  document.getElementById('btn-align').disabled=a.active||a.selectedIds.length<2;
+  document.getElementById('btn-exit-align').disabled=!a.active;
+  document.getElementById('btn-undo-align').disabled=!a.undo;
+  document.getElementById('align-selection').innerHTML=cfg.initialBoxes.map(b=>`<button type="button" data-align-box="${b.id}" aria-pressed="${a.selectedIds.includes(b.id)}">${a.active?'':'Select '} ${b.badge}${a.referenceId===b.id?' · Reference':a.selectedIds.includes(b.id)?' ✓':''}</button>`).join('');
+  document.getElementById('align-status').textContent=a.selectedIds.length<2?'Select at least two shapes to enable Align.':a.feedback;
+  document.getElementById('align-required-reference').textContent=document.body.classList.contains('align-compact')?'Reference: A ★ stays still':'Use A ★ as Reference · Reference stays still';
+}
+function updateAlignPreview(axis,mode) {
+  const group=document.getElementById('align-preview');
+  if(!group || appState.currentStage!==6)return;
+  group.innerHTML=axis?previewAlign(appState,axis,mode).filter(b=>b.id!==appState.align.referenceId).map(b=>buildBoxSvgFaces(b,appState.camera,500,345,5.6,{isTarget:true,fill:'rgba(99,102,241,.12)',stroke:'#6366f1',strokeWidth:2,dashArray:'5 4'})).join(''):'';
+}
+
 function renderMainWorkspace() {
   const stageId = appState.currentStage || 1;
-  dom.workspaceSvg.setAttribute('viewBox', stageId === 4 && window.innerWidth < 600 ? '100 -40 800 680' : stageId === 3 && window.innerWidth < 600 ? '150 70 700 560' : '0 0 1000 620');
+  dom.workspaceSvg.setAttribute('viewBox', stageId===6 ? '-132 -220 1240 1040' : isRotationStage(stageId) && window.innerWidth < 600 ? '100 -40 800 680' : stageId === 3 && window.innerWidth < 600 ? '150 70 700 560' : '0 0 1000 620');
   const cfg = getStepConfig(appState.currentStep, stageId);
   const { targets } = getStepBoxesAndTargets(cfg);
   const boxes = getActiveBoxes(appState);
@@ -603,7 +673,8 @@ function renderMainWorkspace() {
   const studentBoxesMarkup = boxesWithDepth
     .map(({ b, v, isBoxMatched }) => {
       const boxId = b.id || 'b1';
-      const isSelected = boxes.length === 1 || boxId === selectedId;
+      const isSelected = stageId===6 ? appState.align.selectedIds.includes(boxId) : boxes.length === 1 || boxId === selectedId;
+      const isReference=stageId===6 && appState.align.referenceId===boxId;
       const theme = isBoxMatched
         ? BLOCK_COLOR_THEMES.matched
         : BLOCK_COLOR_THEMES[b.colorTheme] || BLOCK_COLOR_THEMES.coral;
@@ -611,8 +682,8 @@ function renderMainWorkspace() {
       const boxFacesMarkup = buildBoxSvgFaces(b, cam, cx, cy, scale, {
         isTarget: false,
         faceColors: theme,
-        stroke: isSelected && boxes.length > 1 ? '#0f172a' : theme.stroke,
-        strokeWidth: isSelected && boxes.length > 1 ? 2.8 : 2
+        stroke: isReference ? '#7c3aed' : isSelected && boxes.length > 1 ? '#0f172a' : theme.stroke,
+        strokeWidth: isReference ? 5 : isSelected && boxes.length > 1 ? 2.8 : 2
       });
 
       // Selection base ring for multi-block steps
@@ -629,12 +700,13 @@ function renderMainWorkspace() {
       }
 
       // Badge pill on block for Stage 2
-      if (stageId === 2 && b.badge) {
+      if ((stageId === 2 || stageId===6) && b.badge) {
         const topPt = projectPoint(v.cx, v.cy, v.z1 + 4, cam, cx, cy, scale);
+        const labelScale=stageId===6 ? 1/(dom.workspaceSvg.getScreenCTM()?.a||1) : 1;
         badgeOverlays.push(`
-          <g class="box-badge-label" transform="translate(${topPt.x.toFixed(1)}, ${topPt.y.toFixed(1)})" pointer-events="none">
-            <rect x="-24" y="-12" width="48" height="22" rx="11" fill="${isSelected ? '#0f172a' : '#334155'}" stroke="${isSelected ? '#facc15' : '#ffffff'}" stroke-width="2" />
-            <text x="0" y="4" text-anchor="middle" font-size="12" font-weight="900" fill="#ffffff">${b.badge}</text>
+          <g class="box-badge-label" transform="translate(${topPt.x.toFixed(1)}, ${topPt.y.toFixed(1)}) scale(${labelScale})" pointer-events="none">
+            <rect x="${isReference?-53:-24}" y="-12" width="${isReference?106:48}" height="22" rx="11" fill="${isSelected ? '#0f172a' : '#334155'}" stroke="${isSelected ? '#facc15' : '#ffffff'}" stroke-width="2" />
+            <text x="0" y="4" text-anchor="middle" font-size="12" font-weight="900" fill="#ffffff">${b.badge}${isReference?" · Reference":""}</text>
           </g>
         `);
       }
@@ -668,7 +740,7 @@ function renderMainWorkspace() {
       : '';
 
   // 5. Relevant handle ONLY for the currently selected box (rendered on top of all blocks so never occluded)
-  const handlesMarkup = stageId === 4 ? buildTurnHandles(primaryBox, targets[0], cam, cx, cy, scale) : buildRelevantHandleMarkup(
+  const handlesMarkup = stageId===6 ? buildAlignControls(cfg,cam,cx,cy,scale) : isRotationStage(stageId) ? buildTurnHandles(primaryBox, targets[0], cam, cx, cy, scale) : buildRelevantHandleMarkup(
     primaryAllowed,
     primaryVertices,
     cam,
@@ -680,7 +752,7 @@ function renderMainWorkspace() {
 
   // Cute Little Bot mascot on the completed Stage 1 Step 8 Safe Robot Base (40 × 30 × 4 mm)
   let robotMascotMarkup = '';
-  if (stageId === 1 && appState.currentStep === TOTAL_STEPS && match.matched && !appState.freePlay) {
+  if (stageId === 1 && appState.currentStep === getStageStepCount(appState.currentStage) && match.matched && !appState.freePlay) {
     const botPt = projectPoint(
       (primaryVertices.x0 + primaryVertices.x1) / 2,
       (primaryVertices.y0 + primaryVertices.y1) / 2,
@@ -705,7 +777,7 @@ function renderMainWorkspace() {
   let niceBadgeMarkup = '';
   if (match.matched && !appState.freePlay) {
     const badgeZ =
-      stageId === 1 && appState.currentStep === TOTAL_STEPS
+      stageId === 1 && appState.currentStep === getStageStepCount(appState.currentStage)
         ? primaryVertices.z1 + 26
         : primaryVertices.z1 + 18;
     const badgePt = projectPoint(
@@ -730,11 +802,11 @@ function renderMainWorkspace() {
     <polygon points="${wpPoly}" fill="#f0f9ff" stroke="#0284c7" stroke-width="3" stroke-linejoin="round" pointer-events="none" />
     ${gridLines}
     <text x="${frontMid.x.toFixed(1)}" y="${(frontMid.y + 16).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="800" fill="#0284c7" pointer-events="none">
-      ${stageId === 4 ? 'FRONT (+Y) · WORKPLANE' : 'WORKPLANE'}
+      ${(isRotationStage(stageId)||stageId===6) ? 'FRONT (+Y) · WORKPLANE' : 'WORKPLANE'}
     </text>
 
     <g id="target-ghost-group" pointer-events="none">
-      ${targetGroupsMarkup}
+      ${stageId===6?'':targetGroupsMarkup}
     </g>
 
     ${shadowsMarkup}
@@ -754,6 +826,7 @@ function renderMainWorkspace() {
 
     ${robotMascotMarkup}
     ${handlesMarkup}
+    ${stageId===6?'<g id="align-preview" pointer-events="none"></g>':''}
     ${niceBadgeMarkup}
     ${stageId === 3 ? `<g pointer-events="none" fill="#0f172a" font-size="${window.innerWidth < 600 ? 24 : 16}">
       <text x="${window.innerWidth < 600 ? 180 : 20}" y="565">Length ${primaryBox.length.toFixed(1)} · Width ${primaryBox.width.toFixed(1)} mm</text>
@@ -812,7 +885,17 @@ function updateCompletionModalContent() {
   if (!dom.modalCompleteTitle || !dom.modalCompleteDesc || !dom.skillsReviewGrid) return;
 
   dom.btnChangeDesign?.classList.toggle('hidden', stageId >= 3);
-  if (stageId === 4) {
+  document.getElementById('modal-complete-skills-heading').textContent = `Review My Skills (${getStageStepCount(stageId)} / ${getStageStepCount(stageId)})`;
+  dom.btnReplayAll.textContent = `↺ Replay 1 / ${getStageStepCount(stageId)}`;
+  if (stageId === 6) {
+    dom.modalCompleteTitle.textContent = "🏆 Stage 6 — Align Shapes Complete!";
+    dom.modalCompleteDesc.textContent = "You aligned edges and centers in three directions!";
+    dom.skillsReviewGrid.innerHTML = getStageConfig(6).steps.map(task=>`<span class="skill-chip">✓ ${task.step}. ${task.title}</span>`).join('');
+  } else if (stageId === 5) {
+    dom.modalCompleteTitle.textContent = '🏆 Stage 5 — Rotation Challenge Complete!';
+    dom.modalCompleteDesc.textContent = 'You matched all 12 targets using three ways to turn!';
+    dom.skillsReviewGrid.innerHTML = getStageConfig(5).steps.map(task=>`<span class="skill-chip">✓ ${task.step}. ${task.title}</span>`).join('');
+  } else if (stageId === 4) {
     dom.modalCompleteTitle.textContent = '🏆 Stage 4 — Rotate in 3D Complete!';
     dom.modalCompleteDesc.textContent = 'You explored three ways to turn and matched all 8 targets!';
     dom.skillsReviewGrid.innerHTML = getStageConfig(4).steps.map(task=>`<span class="skill-chip">✓ ${task.step}. ${task.title}</span>`).join('');
@@ -881,11 +964,19 @@ function renderAll() {
 
   document.getElementById('btn-stage-4')?.classList.toggle('active',stageId===4);
   document.getElementById('card-select-stage-4')?.classList.toggle('active',stageId===4);
-  document.body.classList.toggle('stage-four',stageId===4);
-  document.querySelector('.viewcube-widget').classList.toggle('hidden',stageId===4);
-  document.getElementById('turn-toolbar').classList.toggle('hidden',stageId!==4);
-  dom.viewBtns.forEach(button=>{button.disabled=stageId===4;});
-  dom.stepProgress.textContent = `${appState.currentStep} / ${TOTAL_STEPS}`;
+  document.getElementById('btn-stage-5')?.classList.toggle('active',stageId===5);
+  document.getElementById('card-select-stage-5')?.classList.toggle('active',stageId===5);
+  document.getElementById('btn-stage-6').classList.toggle('active',stageId===6);
+  document.getElementById('card-select-stage-6').classList.toggle('active',stageId===6);
+  document.body.classList.toggle('stage-six',stageId===6);
+  document.body.classList.toggle('align-compact',stageId===6 && (window.innerHeight<820 || window.innerWidth<360));
+  renderAlignToolbar();
+  renderCompactAlignControls();
+  document.body.classList.toggle('stage-four',isRotationStage(stageId));
+  document.querySelector('.viewcube-widget').classList.toggle('hidden',isRotationStage(stageId)||stageId===6);
+  document.getElementById('turn-toolbar').classList.toggle('hidden',!isRotationStage(stageId));
+  dom.viewBtns.forEach(button=>{button.disabled=isRotationStage(stageId)||stageId===6;});
+  dom.stepProgress.textContent = `${appState.currentStep} / ${getStageStepCount(stageId)}`;
   if (appState.freePlay) {
     dom.stepInstruction.textContent = 'Free build! Try any handle.';
   } else {
@@ -912,7 +1003,7 @@ function renderAll() {
 
   // Hint toast
   if (appState.hintActive && !match.matched) {
-    dom.hintToast.textContent = stageId===4 && appState.currentStep===8 && appState.hintLevel>=2 ? 'Try Spin 90°, then Tip Forward 90°. Watch where the star goes.' : cfg.hintText;
+    dom.hintToast.textContent = (stageId===5||stageId===6) ? cfg.hintLevels[(appState.hintLevel || 1)-1] : stageId===4 && appState.currentStep===8 && appState.hintLevel>=2 ? 'Try Spin 90°, then Tip Forward 90°. Watch where the star goes.' : cfg.hintText;
     dom.hintToast.classList.remove('hidden');
   } else {
     dom.hintToast.classList.add('hidden');
@@ -924,7 +1015,7 @@ function renderAll() {
   }
   dom.btnNext.disabled = !appState.freePlay && !match.matched;
   dom.btnNext.textContent =
-    appState.currentStep === TOTAL_STEPS && (match.matched || appState.freePlay) ? 'Finish 🎉' : 'Next →';
+    appState.currentStep === getStageStepCount(appState.currentStage) && (match.matched || appState.freePlay) ? 'Finish 🎉' : 'Next →';
 
   updateCompletionModalContent();
   renderMainWorkspace();
@@ -937,7 +1028,7 @@ function persistAndRender() {
 }
 
 function switchStage(targetStageId) {
-  const normalizedTarget = [1,2,3,4].includes(targetStageId) ? targetStageId : 1;
+  const normalizedTarget = [1,2,3,4,5,6].includes(targetStageId) ? targetStageId : 1;
   pointerSession = null;
   // Save current stage before switching
   storageManager.saveProgress(appState);
@@ -946,7 +1037,8 @@ function switchStage(targetStageId) {
   if (dom.modalComplete) dom.modalComplete.classList.add('hidden');
   if (dom.modalStages) dom.modalStages.classList.add('hidden');
   persistAndRender();
-  document.getElementById('modal-turn-intro').classList.toggle('hidden',normalizedTarget!==4);
+  document.getElementById('modal-turn-intro').classList.toggle('hidden',!isRotationStage(normalizedTarget));
+  document.getElementById('modal-align-intro').classList.toggle('hidden',normalizedTarget!==6);
 }
 
 function safeSetPointerCapture(el, pointerId) {
@@ -960,6 +1052,27 @@ function safeSetPointerCapture(el, pointerId) {
 }
 
 function setupInteractions() {
+  document.getElementById('btn-stage-6').addEventListener('click',()=>switchStage(6));
+  document.getElementById('card-select-stage-6').addEventListener('click',()=>switchStage(6));
+  document.getElementById('btn-close-align-intro').addEventListener('click',()=>document.getElementById('modal-align-intro').classList.add('hidden'));
+  document.getElementById('btn-align-help').addEventListener('click',()=>document.getElementById('modal-align-intro').classList.remove('hidden'));
+  document.getElementById('btn-multiple').addEventListener('click',()=>{appState={...appState,align:{...appState.align,multiple:!appState.align.multiple}};persistAndRender();});
+  document.getElementById('btn-align').addEventListener('click',()=>{appState=setAlignMode(appState,true);persistAndRender();});
+  document.getElementById('btn-exit-align').addEventListener('click',()=>{appState=setAlignMode(appState,false);persistAndRender();});
+  document.getElementById('btn-undo-align').addEventListener('click',()=>{appState=undoAlign(appState);persistAndRender();});
+  document.getElementById('align-selection').addEventListener('click',e=>{const b=e.target.closest('[data-align-box]');if(b){appState=selectAlignBox(appState,b.dataset.alignBox,e.shiftKey);persistAndRender();}});
+  for(const surface of [dom.workspaceSvg,document.getElementById('align-compact-controls')])surface.addEventListener('click',e=>{
+    if(appState.currentStage!==6)return;
+    const dot=e.target.closest('.align-dot'),box=e.target.closest('[data-box-id]');
+    if(dot)appState=applyAlign(appState,dot.dataset.axis,dot.dataset.mode);
+    else if(box)appState=selectAlignBox(appState,box.dataset.boxId,e.shiftKey);
+    else return;
+    persistAndRender();
+  });
+  dom.workspaceSvg.addEventListener('keydown',e=>{if(appState.currentStage===6 && ['Enter',' '].includes(e.key) && e.target.closest('.align-dot')){e.preventDefault();const d=e.target.closest('.align-dot');appState=applyAlign(appState,d.dataset.axis,d.dataset.mode);persistAndRender();}});
+  for(const surface of [dom.workspaceSvg,document.getElementById('align-compact-controls')])for(const event of ['pointerover','focusin'])surface.addEventListener(event,e=>{const d=e.target.closest('.align-dot');if(d && d.getAttribute('aria-disabled')==='false')updateAlignPreview(d.dataset.axis,d.dataset.mode);});
+  for(const surface of [dom.workspaceSvg,document.getElementById('align-compact-controls')])for(const event of ['pointerout','focusout'])surface.addEventListener(event,()=>updateAlignPreview(null));
+
   function clientToSvgPoint(clientX, clientY) {
     const ctm = dom.workspaceSvg.getScreenCTM();
     if (ctm && ctm.a !== 0 && ctm.d !== 0) {
@@ -980,6 +1093,8 @@ function setupInteractions() {
   dom.workspaceSvg.addEventListener('pointerdown', (e) => {
     const stageId = appState.currentStage || 1;
     const cfg = getStepConfig(appState.currentStep, stageId);
+
+    if(stageId===6){e.preventDefault();return;}
 
     // Check if the user clicked a specific block in a multi-block step
     const boxItemEl = e.target.closest('[data-box-id]');
@@ -1009,7 +1124,7 @@ function setupInteractions() {
       appState.freePlay && ['move', 'length', 'width', 'height', 'lift', 'rotate'].includes(rawAction)
         ? true
         : allowedList.includes(rawAction);
-    if (stageId===4 && !isPermitted) { e.preventDefault(); return; }
+    if (isRotationStage(stageId) && !isPermitted) { e.preventDefault(); return; }
     const action = isPermitted ? rawAction : 'orbit';
 
     e.preventDefault();
@@ -1041,7 +1156,7 @@ function setupInteractions() {
       startCam: { ...appState.camera }
     };
     safeSetPointerCapture(dom.workspaceSvg, e.pointerId);
-    if (stageId===4) renderAll();
+    if (isRotationStage(stageId)) renderAll();
   });
 
   function clientDeltaToSvgDelta(startX, startY, currentX, currentY) {
@@ -1071,7 +1186,7 @@ function setupInteractions() {
 
     const { action, boxId, startBox, startCam } = pointerSession;
 
-    if (appState.currentStage===4 && TURN_AXES[action]) {
+    if (isRotationStage(appState.currentStage) && TURN_AXES[action]) {
       const distance=TURN_AXES[action].drag==='vertical' ? -dySvg : dxSvg;
       if (Math.hypot(dxSvg,dySvg)<3) return;
       const nearest=Math.round(distance/90)*90;
@@ -1188,6 +1303,8 @@ function setupInteractions() {
   dom.btnStage3?.addEventListener('click', () => switchStage(3));
   document.getElementById('card-select-stage-3')?.addEventListener('click', () => switchStage(3));
 
+  document.getElementById('btn-stage-5').addEventListener('click',()=>switchStage(5));
+  document.getElementById('card-select-stage-5').addEventListener('click',()=>switchStage(5));
   document.getElementById('btn-stage-4').addEventListener('click',()=>switchStage(4));
   document.getElementById('card-select-stage-4').addEventListener('click',()=>switchStage(4));
   for (const id of ['btn-close-turn-intro','btn-start-turn']) {
@@ -1218,7 +1335,7 @@ function setupInteractions() {
   dom.viewBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       pointerSession = null;
-      if (appState.currentStage===4) return;
+      if (isRotationStage(appState.currentStage)) return;
       const viewKey = btn.dataset.view;
       const preset = CAMERA_PRESETS[viewKey] || CAMERA_PRESETS.ISO;
       appState = setCameraInState(appState, { ...preset });
@@ -1250,7 +1367,11 @@ function setupInteractions() {
 
   // Hint Button
   dom.btnHint.addEventListener('click', () => {
-    if (appState.currentStage===4 && appState.currentStep===8) {
+    if (appState.currentStage===5 || appState.currentStage===6) {
+      const levels = getStepConfig(appState.currentStep,appState.currentStage).hintLevels.length;
+      appState.hintLevel=((appState.hintLevel || 0)+1)%(levels+1);
+      appState.hintActive=appState.hintLevel>0;
+    } else if (appState.currentStage===4 && appState.currentStep===8) {
       appState.hintLevel=((appState.hintLevel || 0)+1)%3;
       appState.hintActive=appState.hintLevel>0;
     } else appState.hintActive = !appState.hintActive;
@@ -1262,7 +1383,7 @@ function setupInteractions() {
     const match = evaluateStepMatch(appState);
     if (!match.matched && !appState.freePlay) return;
 
-    if (appState.currentStep === TOTAL_STEPS) {
+    if (appState.currentStep === getStageStepCount(appState.currentStage)) {
       if (dom.modalComplete) {
         updateCompletionModalContent();
         dom.modalComplete.classList.remove('hidden');
@@ -1287,17 +1408,9 @@ function setupInteractions() {
     dom.btnStageSelect.addEventListener('click', () => {
       dom.modalComplete.classList.add('hidden');
       if (dom.modalStages) {
-        const s1 = storageManager.loadProgress(1);
-        const s2 = storageManager.loadProgress(2);
-        const s3 = storageManager.loadProgress(3);
-        const s4 = storageManager.loadProgress(4);
-        document.getElementById('stage-4-progress-summary').textContent = `Step ${s4.currentStep} / ${TOTAL_STEPS} (${s4.completedSteps.length} done)`;
-        document.getElementById('stage-3-progress-summary').textContent = `Step ${s3.currentStep} / ${TOTAL_STEPS} (${s3.completedSteps.length} done)`;
-        if (dom.stage1ProgressSummary) {
-          dom.stage1ProgressSummary.textContent = `Step ${s1.currentStep} / ${TOTAL_STEPS} (${s1.completedSteps.length} done)`;
-        }
-        if (dom.stage2ProgressSummary) {
-          dom.stage2ProgressSummary.textContent = `Step ${s2.currentStep} / ${TOTAL_STEPS} (${s2.completedSteps.length} done)`;
+        for (const id of [1,2,3,4,5,6]) {
+          const saved = storageManager.loadProgress(id);
+          document.getElementById(`stage-${id}-progress-summary`).textContent = `Step ${saved.currentStep} / ${getStageStepCount(id)} (${saved.completedSteps.length} done)`;
         }
         dom.modalStages.classList.remove('hidden');
       }
@@ -1335,4 +1448,6 @@ setupInteractions();
 window.addEventListener('resize', () => { pointerSession = null; renderAll(); });
 renderAll();
 
-if (appState.currentStage===4) document.getElementById('modal-turn-intro').classList.remove('hidden');
+if (isRotationStage(appState.currentStage)) document.getElementById('modal-turn-intro').classList.remove('hidden');
+
+if(appState.currentStage===6)document.getElementById('modal-align-intro').classList.remove('hidden');

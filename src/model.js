@@ -640,11 +640,11 @@ export function orientedPoint(box, local) {
   const [x,y,z] = rotateVector(box.orientation, local);
   return { x: box.x+box.length/2+x, y: box.y+box.width/2+y, z: box.z+box.height/2+z };
 }
-const turnTask = (step, title, instruction, hintText, actions, solution) => {
+const turnTask = (step, title, instruction, hintText, actions, solution, stage = 4) => {
   const initial = { id:'b1', colorTheme:'coral', x:34, y:29, z:26, length:32, width:22, height:16,
     rotation:0, orientationVersion:ORIENTATION_VERSION, orientation:[1,0,0,0], allowedActions:actions };
   const orientation = solution.reduce((q,[axis,angle]) => rotateWorld(q,axis,angle), initial.orientation);
-  return { step, stage:4, title, instruction, hintText, allowedActions:actions, initialCamera:'ISO',
+  return { step, stage, title, instruction, hintText, allowedActions:actions, initialCamera:'ISO',
     initialBoxes:[initial], targets:[{...initial,orientation}], solution };
 };
 export const STAGE_4_STEPS = Object.freeze([
@@ -657,6 +657,150 @@ export const STAGE_4_STEPS = Object.freeze([
   turnTask(7,'Choose the Right Arrow','Choose the right arrow. Turn to match.','Try Tip Forward / Back: tip backward toward the target.',['spin','tip-forward','tip-side'],[['x',90]]),
   turnTask(8,'Two-Turn Challenge','Use two turns to match the target.','Look at the front arrow and the top star.',['spin','tip-forward','tip-side'],[['z',90],['x',-90]])
 ]);
+
+// Stage 5 reuses the Stage 4 block, world axes and orientation generator unchanged.
+const challengeTurn = (step, instruction, solution) => {
+  const actions = Object.keys(TURN_AXES);
+  const observe = 'Look at the top star, front arrow, and side diamond.';
+  const action = actions.find(key => TURN_AXES[key].axis === solution[0][0]);
+  const describe = ([axis, degrees]) => axis === 'x'
+    ? `Tip ${degrees > 0 ? 'backward' : 'forward'} ${Math.abs(degrees)}°`
+    : axis === 'y' ? `Tip Sideways ${degrees > 0 ? 'right' : 'left'} ${Math.abs(degrees)}°`
+      : `Spin ${degrees > 0 ? '+' : '−'}${Math.abs(degrees)}°`;
+  return {
+    ...turnTask(step, `Rotation Challenge ${step}`, instruction, observe, actions, solution, 5),
+    hintLevels: [observe, `${TURN_AXES[action].label} is one helpful action. Compare the face marks as you turn.`,
+      `From the start: ${solution.map(describe).join(', then ')}. You may click Reset first to try this example.`]
+  };
+};
+export const STAGE_5_STEPS = Object.freeze([
+  challengeTurn(1, 'Choose an arrow. Match the target.', [['z',90]]),
+  challengeTurn(2, 'Look at the top mark. Turn to match.', [['x',90]]),
+  challengeTurn(3, 'Match the front and top marks.', [['y',90]]),
+  challengeTurn(4, 'Which arrow will help?', [['z',-90]]),
+  challengeTurn(5, 'Turn the block to match the target.', [['x',-90]]),
+  challengeTurn(6, 'Look closely. Match the direction.', [['y',-90]]),
+  challengeTurn(7, 'Use two turns to match.', [['x',90],['y',90]]),
+  challengeTurn(8, 'Watch where the top mark goes.', [['z',90],['x',90]]),
+  // Original Y+90, Z-90 duplicates Q7. Change only the Z sign.
+  challengeTurn(9, 'Match all the visible marks.', [['y',90],['z',90]]),
+  challengeTurn(10, 'Look again. The target is different.', [['y',90],['x',90]]),
+  challengeTurn(11, 'Keep turning until the marks match.', [['z',180],['x',90]]),
+  // Original X+90, Y+90, Z+90 collapses to Q3 (Y+90). Change only Z.
+  challengeTurn(12, 'Final challenge! Match the whole block.', [['x',90],['y',90],['z',-90]])
+]);
+
+export function isRotationStage(stageId) {
+  return stageId === 4 || stageId === 5;
+}
+
+// Align uses unrotated WORLD bounds: +X right, +Y front, +Z up.
+export const ALIGN_AXES = Object.freeze({
+  x: { position:'x', size:'length', labels:['Left','Center','Right'], title:'Left / Right' },
+  y: { position:'y', size:'width', labels:['Back','Center','Front'], title:'Front / Back' },
+  z: { position:'z', size:'height', labels:['Bottom','Middle','Top'], title:'Height' }
+});
+export const ALIGN_MODES = Object.freeze(['min','center','max']);
+export function alignCoordinate(box, axis, mode) {
+  const spec=ALIGN_AXES[axis];
+  return box[spec.position]+box[spec.size]*(mode==='min'?0:mode==='center'?.5:1);
+}
+export function alignedBoxes(boxes, selectedIds, referenceId, axis, mode) {
+  if (!ALIGN_AXES[axis] || !ALIGN_MODES.includes(mode)) return boxes;
+  const ref=boxes.find(b=>b.id===referenceId);
+  if (!ref || !selectedIds.includes(referenceId) || selectedIds.length<2) return boxes;
+  const spec=ALIGN_AXES[axis], anchor=alignCoordinate(ref,axis,mode);
+  return boxes.map(b=>b.id===referenceId || !selectedIds.includes(b.id) ? {...b}
+    : {...b,[spec.position]:anchor-b[spec.size]*(mode==='min'?0:mode==='center'?.5:1)});
+}
+const alignBox=(id,badge,colorTheme,x,y,z,length,width,height)=>({id,badge,colorTheme,x,y,z,length,width,height,rotation:0,allowedActions:[]});
+const alignTask=(step,title,instruction,requirements,initialBoxes,axes)=>{
+  const referenceId='b1',ids=initialBoxes.map(b=>b.id);
+  const targets=requirements.reduce((boxes,[axis,mode])=>alignedBoxes(boxes,ids,referenceId,axis,mode),initialBoxes);
+  return {step,stage:6,title,instruction,initialBoxes,targets,referenceId,axes,requirements,initialCamera:'ISO',allowedActions:[],
+    hintLevels:[`Look at ${requirements.map(([a,m])=>m==='center'?(a==='z'?'middle heights':'centers'):ALIGN_AXES[a].labels[ALIGN_MODES.indexOf(m)].toLowerCase()+(a==='z'?' faces':' edges')).join(' and ')}. Compare A ★ with the other shapes.`,
+      `Use ${requirements.map(([a])=>ALIGN_AXES[a].title).join(' and ')}. Reference A ★ stays still.`,
+      `Choose A ★ as Reference. Click ${requirements.map(([a,m])=>ALIGN_AXES[a].title+': '+ALIGN_AXES[a].labels[ALIGN_MODES.indexOf(m)]).join(', then ')}. Undo or Reset lets you try again.`]};
+};
+const horizontalPair=()=>[alignBox('b1','A ★','coral',42,12,0,30,18,12),alignBox('b2','B ◆','cobalt',12,50,0,16,16,10)];
+const depthPair=()=>[alignBox('b1','A ★','coral',12,34,0,20,30,12),alignBox('b2','B ◆','cobalt',64,8,0,18,14,10)];
+const heightPair=()=>[alignBox('b1','A ★','coral',12,12,24,24,18,18),alignBox('b2','B ◆','cobalt',64,50,4,18,16,10)];
+export const STAGE_6_STEPS=Object.freeze([
+  alignTask(1,'Match the Left Edges','Click a dot to line up the left edges.',[['x','min']],horizontalPair(),['x']),
+  alignTask(2,'Match the Centers','Line up the centers.',[['x','center']],horizontalPair(),['x']),
+  alignTask(3,'Match the Right Edges','Line up the right edges.',[['x','max']],horizontalPair(),['x']),
+  alignTask(4,'Match the Front Edges','Choose the reference. Align the front edges.',[['y','max']],depthPair(),['y']),
+  alignTask(5,'Center Front to Back','Match the centers from front to back.',[['y','center']],depthPair(),['y']),
+  alignTask(6,'Match the Back Edges','Line up the back edges.',[['y','min']],depthPair(),['y']),
+  alignTask(7,'Match the Bottoms','Line up the bottoms.',[['z','min']],heightPair(),['z']),
+  alignTask(8,'Match the Middle Heights','Line up the middle heights.',[['z','center']],heightPair(),['z']),
+  alignTask(9,'Match the Tops','Line up the tops. Keep the sizes the same.',[['z','max']],heightPair(),['z'])
+]);
+export function initialAlignState(cfg) {
+  return {version:1,selectedIds:cfg.step<=9?cfg.initialBoxes.map(b=>b.id):[],multiple:cfg.step<=9,active:cfg.step<=3,
+    referenceId:cfg.step<=3?cfg.referenceId:null,operations:[],undo:null,feedback:'Reference stays still. Use A ★ as Reference.'};
+}
+export function selectAlignBox(state,id,shift=false) {
+  if(state.currentStage!==6 || !state.boxes.some(b=>b.id===id))return state;
+  const a=state.align;
+  if(a.active){
+    if(!a.selectedIds.includes(id))return {...state,align:{...a,feedback:'Select this shape before choosing it as Reference.'}};
+    return {...state,align:{...a,referenceId:id,feedback:id===getStepConfig(state.currentStep,6).referenceId?'Reference A ★ stays still. Click a dot.':'Use A ★ as Reference for this task. No shapes moved.'}};
+  }
+  const selectedIds=a.multiple||shift?(a.selectedIds.includes(id)?a.selectedIds.filter(n=>n!==id):[...a.selectedIds,id]):[id];
+  return {...state,align:{...a,selectedIds,referenceId:selectedIds.includes(a.referenceId)?a.referenceId:null,feedback:`${selectedIds.length} shapes selected. Choose Align when ready.`}};
+}
+export function setAlignMode(state,active) {
+  if(state.currentStage!==6 || (active && state.align.selectedIds.length<2))return state;
+  return {...state,align:{...state.align,active,feedback:active?'Choose a selected shape as Reference.':'Selection mode. Choose shapes, then Align.'}};
+}
+export function previewAlign(state,axis,mode) {
+  if(state.currentStage!==6 || !state.align.active || state.align.referenceId!==getStepConfig(state.currentStep,6).referenceId)return state.boxes;
+  return alignedBoxes(state.boxes,state.align.selectedIds,state.align.referenceId,axis,mode);
+}
+export function applyAlign(state,axis,mode) {
+  if(state.currentStage!==6)return state;
+  const cfg=getStepConfig(state.currentStep,6),a=state.align;
+  if(!a.active || a.referenceId!==cfg.referenceId || !a.selectedIds.includes(a.referenceId) || a.selectedIds.length<2 || !cfg.axes.includes(axis) || !ALIGN_MODES.includes(mode))return state;
+  const boxes=previewAlign(state,axis,mode);
+  if(boxes.some(b=>b.z<0))return {...state,align:{...a,feedback:'That would go below the workplane. Try another dot.'}};
+  const key=`${axis}:${mode}`;
+  // One local undo, not a global history. A no-op repeat keeps the last useful undo.
+  const changed=boxes.some((b,i)=>['x','y','z'].some(k=>b[k]!==state.boxes[i][k]));
+  const result={...state,boxes,box:toPlainBox(boxes[0]),align:{...a,operations:[...new Set([...a.operations,key])],
+    undo:changed?{boxes:state.boxes.map(b=>({...b})),operations:[...a.operations]}:a.undo,
+    feedback:`Aligned ${ALIGN_AXES[axis].labels[ALIGN_MODES.indexOf(mode)]} (${ALIGN_AXES[axis].title}). Reference stays still. Undo Align to try again.`}};
+  if(evaluateAlignMatch(result).matched&&!result.completedSteps.includes(result.currentStep))result.completedSteps=[...result.completedSteps,result.currentStep];
+  return result;
+}
+export function undoAlign(state) {
+  if(state.currentStage!==6 || !state.align.undo)return state;
+  const u=state.align.undo;
+  return {...state,boxes:u.boxes.map(b=>({...b})),box:toPlainBox(u.boxes[0]),align:{...state.align,operations:[...u.operations],undo:null,feedback:'Last alignment undone. Reference stays still.'}};
+}
+// Only positions and validated Align UI state restore; configured dimensions/rotation remain authoritative.
+export function restoreAlignSnapshot(state,snap) {
+  const cfg=getStepConfig(state.currentStep,6),raw=snap.align;
+  if(raw?.version!==1)return {...state,boxes:cfg.initialBoxes.map(b=>({...b})),box:toPlainBox(cfg.initialBoxes[0]),align:initialAlignState(cfg)};
+  const positions=(saved)=>cfg.initialBoxes.map(initial=>{
+    const b=saved?.find(b=>b?.id===initial.id);
+    if(initial.id===cfg.referenceId)return {...initial};
+    return {...initial,...Object.fromEntries(['x','y','z'].map(k=>[k,Number.isFinite(b?.[k])&&b[k]>=0&&b[k]<=100?b[k]:initial[k]]))};
+  });
+  const ids=cfg.initialBoxes.map(b=>b.id),ops=v=>Array.isArray(v)?[...new Set(v.filter(x=>typeof x==='string' && /^[xyz]:(min|center|max)$/.test(x)))]:[];
+  const selectedIds=Array.isArray(raw.selectedIds)?[...new Set(raw.selectedIds.filter(id=>ids.includes(id)))]:[];
+  const boxes=positions(snap.boxes);
+  return {...state,boxes,box:toPlainBox(boxes[0]),align:{...initialAlignState(cfg),selectedIds,multiple:!!raw.multiple,active:!!raw.active&&selectedIds.length>=2,
+    referenceId:selectedIds.includes(raw.referenceId)?raw.referenceId:null,operations:ops(raw.operations),
+    undo:raw.undo&&Array.isArray(raw.undo.boxes)?{boxes:positions(raw.undo.boxes),operations:ops(raw.undo.operations)}:null}};
+}
+export function evaluateAlignMatch(state) {
+  const cfg=getStepConfig(state.currentStep,6),a=state.align;
+  const boxResults=cfg.targets.map(t=>{const b=state.boxes.find(b=>b.id===t.id);return {id:t.id,matched:!!b&&['x','y','z','length','width','height','rotation'].every(k=>Math.abs(b[k]-t[k])<1e-6)&&!b.orientation};});
+  const operationsOk=cfg.requirements.every(([axis,mode])=>a.operations.includes(`${axis}:${mode}`));
+  const matched=boxResults.every(r=>r.matched)&&operationsOk&&a.referenceId===cfg.referenceId&&cfg.initialBoxes.every(b=>a.selectedIds.includes(b.id));
+  return {matched,boxResults,faceOk:true,rotOk:true};
+}
 
 export const STAGES = Object.freeze({
   1: {
@@ -672,13 +816,20 @@ export const STAGES = Object.freeze({
     steps: STAGE_2_STEPS
   },
   3: { id: 3, name: 'Stage 3 — Size & Lift', shortName: 'Stage 3', steps: STAGE_3_STEPS },
-  4: { id: 4, name: 'Stage 4 — Rotate in 3D', shortName: 'Stage 4', steps: STAGE_4_STEPS }
+  4: { id: 4, name: 'Stage 4 — Rotate in 3D', shortName: 'Stage 4', steps: STAGE_4_STEPS },
+  5: { id: 5, name: 'Stage 5 — Rotation Challenge', shortName: 'Stage 5', steps: STAGE_5_STEPS },
+  6: { id: 6, name: 'Stage 6 — Align Shapes', shortName: 'Stage 6', steps: STAGE_6_STEPS }
 });
 
-export const TOTAL_STEPS = 8;
+// Legacy Stage 1 alias retained for existing consumers; navigation uses getStageStepCount.
+export const TOTAL_STEPS = STEPS.length;
 
 export function getStageConfig(stageId = 1) {
-  return STAGES[[1, 2, 3, 4].includes(stageId) ? stageId : 1];
+  return STAGES[[1, 2, 3, 4, 5, 6].includes(stageId) ? stageId : 1];
+}
+
+export function getStageStepCount(stageId = 1) {
+  return getStageConfig(stageId).steps.length;
 }
 
 export function getStepConfig(stepNumber, stageId = 1) {
@@ -907,13 +1058,14 @@ export function toPlainBox(b) {
 }
 
 export function createStepState(stepNumber = 1, completedSteps = [], stageId = 1) {
-  const normalizedStage = [1, 2, 3, 4].includes(stageId) ? stageId : 1;
+  const normalizedStage = [1, 2, 3, 4, 5, 6].includes(stageId) ? stageId : 1;
   const cfg = getStepConfig(stepNumber, normalizedStage);
   const cam = CAMERA_PRESETS[cfg.initialCamera] || CAMERA_PRESETS.ISO;
   const { initialBoxes } = getStepBoxesAndTargets(cfg);
 
   return {
-    version: normalizedStage === 4 ? 5 : 4,
+    ...(normalizedStage===6 ? {align:initialAlignState(cfg)} : {}),
+    version: isRotationStage(normalizedStage) ? 5 : 4,
     currentStage: normalizedStage,
     currentStep: cfg.step,
     completedSteps: Array.from(new Set(completedSteps)),
@@ -978,6 +1130,7 @@ export function evaluateSingleBoxMatch(box, target) {
  * Uses fixed `id` mapping for multi-block steps so traversal order never alters results.
  */
 export function evaluateStepMatch(state) {
+  if(state.currentStage===6)return evaluateAlignMatch(state);
   const stageId = state.currentStage || 1;
   const cfg = getStepConfig(state.currentStep, stageId);
   const { targets } = getStepBoxesAndTargets(cfg);
@@ -1091,6 +1244,7 @@ export function selectBoxInState(state, boxId) {
  * and only the properties permitted by the step/block configuration.
  */
 export function updateBoxInState(state, updates, enableSnap = true) {
+  if(state.currentStage===6)return state;
   const stageId = state.currentStage || 1;
   const cfg = getStepConfig(state.currentStep, stageId);
   const { targets } = getStepBoxesAndTargets(cfg);
@@ -1117,7 +1271,7 @@ export function updateBoxInState(state, updates, enableSnap = true) {
         ? cfg.allowedActions
         : [cfg.allowedAction];
 
-  if (stageId === 4) {
+  if (isRotationStage(stageId)) {
     const action = updates.turnAction;
     const degrees = updates.turnDegrees;
     if (!cfg.allowedActions.includes(action) || !Number.isFinite(degrees)) return state;
@@ -1224,7 +1378,7 @@ export function updateBoxInState(state, updates, enableSnap = true) {
  * Updates ONLY the camera state. Never mutates `state.box` or `state.boxes`.
  */
 export function setCameraInState(state, cameraUpdates) {
-  if (state.currentStage === 4) return state;
+  if (isRotationStage(state.currentStage) || state.currentStage===6) return state;
   const nextCamera = {
     ...state.camera,
     ...cameraUpdates

@@ -648,3 +648,56 @@ body {
   .turn-toolbar { top:12px; left:10px; max-width:180px; }
   .turn-intro-diagrams { gap:6px; }
 }
+
+/* Stage 6 keeps selection tools outside the projected click-control diagram. */
+.align-toolbar { flex-shrink:0; background:#fff; padding:6px 12px; display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; border-bottom:1px solid #cbd5e1; font-size:12px; }
+.align-actions,.align-selection { display:flex; gap:5px; flex-wrap:wrap; }
+.align-toolbar button { min-height:44px; padding:6px 10px; border:1px solid #94a3b8; border-radius:8px; background:#f8fafc; font-weight:700; color:#0f172a; cursor:pointer; }
+.align-toolbar button[aria-pressed="true"] { background:#dbeafe; border:2px solid #0369a1; }
+.align-toolbar button:disabled { opacity:.45; cursor:default; }
+#align-status { flex-basis:100%; min-height:15px; }
+.stage-six .hint-toast { white-space:normal; max-width:94%; text-align:center; top:8px; bottom:auto; }
+.stage-six .target-preview-card { width:104px; padding:4px; top:5px; right:6px; }
+.stage-six .target-mini-svg { width:92px; height:66px; }
+.align-dot:focus .align-hit { stroke:#0284c7; stroke-width:5; }
+@media(max-width:600px){
+ .stage-six .align-toolbar { padding:4px 8px; gap:4px; font-size:11px; }
+ .stage-six .align-toolbar button { padding:4px 7px; font-size:11px; }
+ .stage-six .align-actions { width:100%; }
+ .stage-six #align-required-reference { font-weight:700; }
+ .stage-six .target-preview-card { width:80px; }
+ .stage-six .target-mini-svg { width:68px; height:48px; }
+}
+
+/* Stage 6 short-window fallback: identical axis/mode targets in separated groups.
+   Neither touch targets nor model geometry are scaled to hide collisions. */
+.align-compact-controls { flex-shrink:0; display:grid; gap:6px; padding:6px 8px; background:#fff; border-top:1px solid #cbd5e1; }
+.align-control-group { display:grid; grid-template-columns:minmax(70px,.9fr) repeat(3,minmax(44px,1fr)); align-items:center; gap:6px; }
+.align-group-title { font-size:12px; font-weight:800; color:#334155; }
+.align-compact-controls .align-dot { min-width:0; }
+.align-compact-controls .align-hit { width:100%; min-height:44px; border:1px solid #94a3b8; border-radius:8px; background:#f8fafc; color:#0f172a; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:5px; padding:4px; cursor:pointer; touch-action:manipulation; }
+.align-compact-controls .align-hit:disabled { opacity:.4; cursor:default; }
+.align-compact-controls .align-hit:focus-visible { outline:3px solid #0284c7; outline-offset:-3px; }
+.align-circle { font-size:16px; line-height:1; color:#111827; pointer-events:none; }
+.align-compact .top-bar { display:grid; grid-template-columns:minmax(0,1fr) auto; padding:4px 8px; gap:4px; }
+.align-compact .top-left-group { grid-column:1; grid-row:1; width:100%; min-width:0; flex-wrap:nowrap; flex-shrink:1; gap:6px; }
+.align-compact .stage-switcher { display:flex; flex-wrap:nowrap; overflow-x:auto; max-width:calc(100vw - 220px); border-radius:10px; scrollbar-width:thin; flex-shrink:1; justify-content:flex-start; }
+.align-compact .stage-pill { flex:0 0 auto; min-height:44px; padding:6px 8px; font-size:12px; }
+.align-compact .stage-status-chip { flex-shrink:0; margin:0; padding:2px; }
+.align-compact .current-stage-label { display:none; }
+.align-compact .progress-badge { font-size:14px; padding:4px 8px; min-width:64px; }
+.align-compact .short-instruction { grid-column:1/-1; grid-row:2; order:0; font-size:14px; line-height:18px; }
+.align-compact .info-corner-btn { grid-column:2; grid-row:1; font-size:11px; padding:4px 6px; }
+.align-compact .align-toolbar { padding:4px 8px; gap:4px 8px; font-size:11px; }
+.align-compact .align-toolbar button { font-size:11px; padding:4px 7px; }
+.align-compact .align-actions { width:auto; }
+.align-compact #align-status { min-height:14px; line-height:14px; }
+.align-compact .stage-container { min-height:0; }
+.align-compact .bottom-bar { flex-shrink:0; height:56px; padding:4px 8px; gap:6px; }
+.align-compact .bottom-bar .ctrl-btn { min-width:0; flex:1; font-size:13px; padding:8px; }
+.align-compact .modal-card { max-height:calc(100vh - 24px); overflow-y:auto; }
+@media(min-width:700px){
+ .align-compact-controls { grid-template-columns:repeat(3,minmax(0,1fr)); }
+ .align-compact-controls .align-control-group { grid-template-columns:repeat(3,minmax(44px,1fr)); gap:4px; }
+ .align-compact-controls .align-group-title { grid-column:1/-1; }
+}

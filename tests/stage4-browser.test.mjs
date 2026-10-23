@@ -123,7 +123,7 @@ for(const offline of [false,true])for(const mobile of [false,true]){
    assert.equal(await evaluate(`!document.querySelector('#modal-complete').classList.contains('hidden')`),true);
    assert.match(await evaluate(`document.querySelector('#modal-complete-title').textContent`),/Stage 4/);
    const legacy=(await read()).stages;
-   await click('#btn-stage-select');assert.equal(await evaluate(`document.querySelectorAll('.stage-select-card').length`),4);
+   await click('#btn-stage-select');assert.equal(await evaluate(`document.querySelectorAll('.stage-select-card').length`),6);
    await click('#card-select-stage-4');await closeIntro();await click('#btn-next');await click('#btn-replay-all');
    assert.equal((await read()).currentStep,1);assert.deepEqual((await read()).completedSteps,[]);
    for(const stage of ['1','2','3'])assert.deepEqual((await read()).stages[stage],legacy[stage]);

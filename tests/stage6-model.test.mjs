@@ -1,0 +1,46 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {STAGE_6_STEPS,ALIGN_AXES,ALIGN_MODES,alignedBoxes,alignCoordinate,createStepState,createInitialState,getStageStepCount,selectAlignBox,setAlignMode,applyAlign,previewAlign,undoAlign,evaluateStepMatch,updateBoxInState,setCameraInState} from '../src/model.js';
+import {createStorageManager,ISOLATED_TEST_STORAGE_KEY} from '../src/storage.js';
+const prepare=(n)=>{let s=createStepState(n,[],6);s.align={...s.align,selectedIds:s.boxes.map(b=>b.id),multiple:true,active:true,referenceId:'b1'};return s;};
+const solve=s=>STAGE_6_STEPS[s.currentStep-1].requirements.reduce((s,[a,m])=>applyAlign(s,a,m),s);
+const backend=()=>{const m=new Map();return {getItem:k=>m.get(k)??null,setItem:(k,v)=>m.set(k,v),removeItem:k=>m.delete(k)};};
+test('Align world-axis min/center/max uses geometric bounds, preserves reference/other axes/size/rotation and is idempotent',()=>{
+ const boxes=[{id:'a',x:30,y:24,z:22,length:32,width:26,height:18,rotation:0},{id:'b',x:2,y:3,z:4,length:14,width:12,height:8,rotation:0},{id:'c',x:70,y:50,z:6,length:18,width:16,height:12,rotation:0}];
+ for(const a of Object.keys(ALIGN_AXES))for(const m of ALIGN_MODES){const out=alignedBoxes(boxes,['a','b','c'],'a',a,m);assert.deepEqual(out[0],boxes[0]);for(let i=1;i<3;i++){assert.equal(alignCoordinate(out[i],a,m),alignCoordinate(boxes[0],a,m));for(const k of ['x','y','z','length','width','height','rotation'].filter(k=>k!==a))assert.equal(out[i][k],boxes[i][k]);}assert.deepEqual(alignedBoxes(out,['a','b','c'],'a',a,m),out);}
+ assert.deepEqual(alignedBoxes(boxes,['a'],'a','x','min'),boxes);
+});
+test('All nine tasks start unmatched, different-size edge/center outcomes differ, and requirements solve in either order',()=>{
+ assert.equal(STAGE_6_STEPS.length,9);assert.deepEqual([1,2,3,4,5,6].map(getStageStepCount),[8,8,8,8,12,9]);
+ for(const cfg of STAGE_6_STEPS){const initial=createStepState(cfg.step,[],6);assert.equal(evaluateStepMatch(initial).matched,false);let s=prepare(cfg.step);const ref=structuredClone(s.boxes[0]);for(const [a,m]of cfg.requirements){for(const wrong of ALIGN_MODES.filter(n=>n!==m)){const t=applyAlign(s,a,wrong);assert.equal(evaluateStepMatch(t).matched,false);assert.deepEqual(t.boxes[0],ref);}s=applyAlign(s,a,m);}assert.equal(evaluateStepMatch(s).matched,true);assert.ok(s.completedSteps.includes(cfg.step));assert.deepEqual(s.boxes,cfg.targets);assert.deepEqual(s.boxes[0],ref);assert.equal(evaluateStepMatch(cfg.requirements.toReversed().reduce((t,[a,m])=>applyAlign(t,a,m),prepare(cfg.step))).matched,true);}
+});
+test('selection, explicit Align and Reference guard; wrong reference never moves shapes; one shape cannot start Align',()=>{
+ let s=createStepState(4,[],6);s.align.selectedIds=[];s.align.multiple=false;assert.equal(s.align.selectedIds.length,0);assert.equal(setAlignMode(s,true),s);s=selectAlignBox(s,'b1');s=selectAlignBox(s,'b2');assert.deepEqual(s.align.selectedIds,['b2']);s.align.multiple=true;s=selectAlignBox(s,'b1');s=setAlignMode(s,true);const before=structuredClone(s.boxes);s=selectAlignBox(s,'b2');assert.match(s.align.feedback,/Use A/);assert.deepEqual(s.boxes,before);assert.equal(applyAlign(s,'y','center'),s);s=selectAlignBox(s,'b1');assert.deepEqual(s.boxes,before);assert.equal(evaluateStepMatch(s).matched,false);assert.equal(evaluateStepMatch(solve(s)).matched,true);
+});
+test('current geometry and actual Align operations both gate success; history, wrong size/orientation/reference or non-target-axis edits cannot bypass',()=>{
+ for(const cfg of STAGE_6_STEPS){let s=solve(prepare(cfg.step));const history=s.completedSteps;const axis=cfg.requirements[0][0],mode=cfg.requirements[0][1];const t=applyAlign(s,axis,ALIGN_MODES.find(m=>m!==mode));assert.equal(evaluateStepMatch(t).matched,false);assert.deepEqual(t.completedSteps,history);s.align.operations=[];assert.equal(evaluateStepMatch(s).matched,false);s=solve(prepare(cfg.step));for(const key of ['length','rotation','x']){const bad=structuredClone(s);bad.boxes[0][key]+=1;assert.equal(evaluateStepMatch(bad).matched,false);}s.boxes[1].orientation=[1,0,0,0];assert.equal(evaluateStepMatch(s).matched,false);}
+});
+test('preview is pure, Undo restores one position change and its operation evidence while retaining history; Reset returns configured selection/reference',()=>{
+ let s=prepare(9),before=structuredClone(s);const ghost=previewAlign(s,'z','center');assert.notDeepEqual(ghost,s.boxes);assert.deepEqual(s,before);s=solve(s);const done=structuredClone(s);s=undoAlign(s);assert.equal(evaluateStepMatch(s).matched,false);assert.deepEqual(s.completedSteps,done.completedSteps);assert.equal(s.align.undo,null);assert.equal(s.align.operations.includes('z:max'),false);assert.equal(s.align.operations.length,0);assert.deepEqual(createStepState(9,s.completedSteps,6).align.selectedIds,['b1','b2']);assert.equal(createStepState(1,[],6).align.referenceId,'b1');assert.equal(createStepState(4,[],6).align.referenceId,null);assert.equal(updateBoxInState(s,{x:99,length:5,rotation:90}),s);assert.equal(setCameraInState(s,{yaw:4}),s);
+});
+test('ground-safe layouts and only permitted learning axes apply; partial selection cannot finish a task',()=>{
+ for(let n=7;n<=9;n++)for(const m of ALIGN_MODES){const s=applyAlign(prepare(n),'z',m);assert.ok(s.boxes.every(b=>b.z>=0));}
+ assert.equal(applyAlign(prepare(1),'z','min').align.operations.length,0);let s=prepare(9);s.align.selectedIds=['b1'];s=solve(s);assert.equal(evaluateStepMatch(s).matched,false);
+});
+test('Stage 6 nine-step positions, selection, Reference, operations and local Undo restore independently; old saves retain prior semantics',()=>{
+ for(const version of [3,4,5]){const b=backend(),old=createStepState(5,[1,2],2);const oldStage1=createStepState(3,[1],1);b.setItem(ISOLATED_TEST_STORAGE_KEY,JSON.stringify(version===3?{...oldStage1,version}:{version,currentStage:2,stages:{1:oldStage1,2:old}}));let manager=createStorageManager({searchString:'?mode=test',customStorage:b});assert.equal(manager.loadProgress(6).currentStep,1);for(let n=1;n<=9;n++){let s=solve(prepare(n));manager.saveProgress(s);const fresh=createStorageManager({searchString:'?mode=test',customStorage:b}).loadProgress(6);assert.equal(fresh.currentStep,n);assert.deepEqual(fresh.boxes,s.boxes);assert.equal(evaluateStepMatch(fresh).matched,true);assert.equal(evaluateStepMatch(undoAlign(fresh)).matched,false);}assert.deepEqual(manager.loadProgress(1).completedSteps,[1]);if(version!==3)assert.deepEqual(manager.loadProgress(2).completedSteps,[1,2]);let fifth=createStepState(12,[1,8,12],5);manager.saveProgress(fifth);assert.equal(manager.loadProgress(6).currentStep,9);assert.deepEqual(manager.loadProgress(5).completedSteps,[1,8,12]);}
+});
+test('unknown/corrupt Align metadata cannot invent completion; saved dimensions/camera/reference positions cannot overwrite configuration',()=>{
+ const b=backend(),m=createStorageManager({searchString:'?mode=test',customStorage:b});const s=solve(prepare(9));m.saveProgress(s);let raw=JSON.parse(b.getItem(ISOLATED_TEST_STORAGE_KEY));raw.stages[6].align.version=999;b.setItem(ISOLATED_TEST_STORAGE_KEY,JSON.stringify(raw));assert.equal(evaluateStepMatch(m.loadProgress(6)).matched,false);m.saveProgress(s);raw=JSON.parse(b.getItem(ISOLATED_TEST_STORAGE_KEY));raw.stages[6].boxes[0].x=0;raw.stages[6].boxes[1].length=90;raw.stages[6].camera.yaw=0;b.setItem(ISOLATED_TEST_STORAGE_KEY,JSON.stringify(raw));const restored=m.loadProgress(6);assert.deepEqual(restored.boxes,s.boxes);assert.equal(restored.camera.yaw,s.camera.yaw);
+});
+test('Removed Q10–12 saves migrate to normal Q9 without geometry/reference/Undo contamination or invented completion',()=>{
+ for(const version of [4,5])for(const cancelled of [10,11,12])for(const completed of [[10,11,12],[1,4,9,10,11,12],[2,2,8,12,0,99]]){
+  const b=backend(),others=Object.fromEntries([1,2,3,4,5].map(stage=>[stage,createStepState(2,[1],stage)]));
+  const old={...createStepState(9,[],6),currentStep:cancelled,completedSteps:completed,boxes:[{id:'b1',x:90,y:90,z:70},{id:'b2',x:5,y:5,z:50},{id:'b3',x:1,y:2,z:3}],align:{version:1,selectedIds:['b3'],referenceId:'b3',multiple:true,active:true,operations:['x:center','z:min'],undo:{boxes:[],operations:[]}}};
+  b.setItem(ISOLATED_TEST_STORAGE_KEY,JSON.stringify({version,currentStage:6,stages:{...others,6:old}}));b.setItem('unrelated','keep');
+  const manager=createStorageManager({searchString:'?mode=test',customStorage:b}),s=manager.loadProgress(6),expected=createStepState(9,[...new Set(completed.filter(n=>n>=1&&n<=9))],6);
+  assert.deepEqual(s,expected);assert.equal(evaluateStepMatch(s).matched,false);assert.equal(s.align.referenceId,null);assert.equal(s.align.undo,null);
+  for(const stage of [1,2,3,4,5]){const legacyRotation=version===4&&[4,5].includes(stage);assert.equal(manager.loadProgress(stage).currentStep,legacyRotation?1:2);assert.deepEqual(manager.loadProgress(stage).completedSteps,legacyRotation?[]:[1]);}
+  manager.saveProgress(s);const stored=JSON.parse(b.getItem(ISOLATED_TEST_STORAGE_KEY));for(const stage of [1,2,3,4,5])assert.deepEqual(stored.stages[stage],others[stage]);assert.equal(b.getItem('unrelated'),'keep');assert.deepEqual(manager.loadProgress(6).completedSteps,expected.completedSteps);
+ }
+});

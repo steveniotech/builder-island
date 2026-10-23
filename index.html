@@ -21,6 +21,8 @@
           </button>
           <button type="button" class="stage-pill" id="btn-stage-3" data-stage="3">Stage 3 — Size &amp; Lift</button>
           <button type="button" class="stage-pill" id="btn-stage-4" data-stage="4">Stage 4 — Rotate in 3D</button>
+          <button type="button" class="stage-pill" id="btn-stage-5" data-stage="5">Stage 5 — Rotation Challenge</button>
+          <button type="button" class="stage-pill" id="btn-stage-6" data-stage="6">Stage 6 — Align Shapes</button>
         </div>
         <div class="stage-status-chip">
           <span class="current-stage-label" id="current-stage-name">Stage 1 — Basics</span>
@@ -35,6 +37,11 @@
       </button>
     </header>
 
+    <section id="align-toolbar" class="align-toolbar hidden" aria-label="Align tools">
+      <div class="align-actions"><button type="button" id="btn-multiple" aria-pressed="false">Select Multiple</button><button type="button" id="btn-align">Align</button><button type="button" id="btn-exit-align">Exit Align</button><button type="button" id="btn-undo-align">Undo Align</button><button type="button" id="btn-align-help">?</button></div>
+      <div id="align-selection" class="align-selection"></div>
+      <span id="align-required-reference"></span><span id="align-status" role="status" aria-live="polite"></span>
+    </section>
     <!-- Storage Warning (only visible if browser storage is blocked) -->
     <div class="storage-toast hidden" id="storage-warning-banner" role="alert">
       Practice mode only — progress won’t save after refresh.
@@ -71,6 +78,8 @@
       <div class="hint-toast hidden" id="hint-toast" role="status"></div>
     </main>
 
+    <section id="align-compact-controls" class="align-compact-controls hidden" aria-label="Alignment directions"></section>
+
     <!-- Bottom Control Bar: Back, Reset, Hint, Next -->
     <footer class="bottom-bar">
       <button type="button" class="ctrl-btn btn-prev" id="btn-prev" disabled>
@@ -89,6 +98,7 @@
   </div>
 
   <!-- Stage Selection Modal (accessible from Completion screen) -->
+  <div class="modal-backdrop hidden" id="modal-align-intro" role="dialog" aria-modal="true" aria-labelledby="align-intro-title"><div class="modal-card"><h2 id="align-intro-title">Align Shapes</h2><p>Align moves shapes into line.</p><p>It does not resize or rotate them.</p><p>Choose a reference. The reference stays still.</p><p>Click a dot to align an edge or a center.</p><p>● Align = position · ■ Resize = size</p><button type="button" id="btn-close-align-intro" class="ctrl-btn">Let's Align</button></div></div>
   <div class="modal-backdrop hidden" id="modal-stages" role="dialog" aria-modal="true" aria-labelledby="modal-stages-title">
     <div class="modal-card modal-stages-card">
       <div class="modal-header">
@@ -116,6 +126,10 @@
           <button type="button" class="stage-select-card" id="card-select-stage-4" data-stage="4">
             <span class="stage-card-title">Stage 4 — Rotate in 3D</span><span class="stage-card-desc">8 tasks: Spin, Tip Forward / Back, and Tip Sideways.</span><span class="stage-card-progress" id="stage-4-progress-summary">8 steps</span>
           </button>
+          <button type="button" class="stage-select-card" id="card-select-stage-5" data-stage="5">
+            <span class="stage-card-title">Stage 5 — Rotation Challenge</span><span class="stage-card-desc">12 targets. Choose among all three rotation arrows.</span><span class="stage-card-progress" id="stage-5-progress-summary">12 steps</span>
+          </button>
+          <button type="button" class="stage-select-card" id="card-select-stage-6" data-stage="6"><span class="stage-card-title">Stage 6 — Align Shapes</span><span class="stage-card-desc">9 tasks: align edges and centers in three directions.</span><span class="stage-card-progress" id="stage-6-progress-summary">9 steps</span></button>
         </div>
       </div>
     </div>
