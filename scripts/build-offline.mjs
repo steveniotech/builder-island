@@ -5,7 +5,7 @@ const code = ['src/model.js', 'src/storage.js', 'src/app.js'].map(file => read(f
   .replace(/^import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];\s*/gm, '')
   .replace(/\bexport\s+/g, '')).join('\n');
 const bundle = read('index.html')
-  .replace('<link rel="stylesheet" href="./styles.css" />', `<style>\n${read('styles.css')}</style>`)
+  .replace('<link rel="stylesheet" href="./styles.css" />\n  <link rel="stylesheet" href="./brand.css" />', `<style>\n${read('styles.css')}\n${read('brand.css')}</style>`)
   .replace('<script type="module" src="./src/app.js"></script>', `<script>\n(()=>{\n${code}\n})();\n</script>`);
 if (process.argv.includes('--check')) {
   if (read('Builder-Island-Student.html') !== bundle) throw Error('Offline bundle is out of sync');
